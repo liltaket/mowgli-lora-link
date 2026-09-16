@@ -1,0 +1,4 @@
+intelhex==2.3.0
+platformio==6.2.0
+pyserial==3.5
+ruff==0.16.8
