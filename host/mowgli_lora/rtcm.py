@@ -26,6 +26,17 @@ class RtcmStreamParser:
         self.stats: Counter[str] = Counter()
         self.message_types: Counter[int] = Counter()
 
+    def reset(self) -> None:
+        """Discard a partial stream after its underlying source changed.
+
+        A TCP/USB reconnect is a stream boundary.  Keeping a partial RTCM
+        frame from before that boundary could splice two unrelated sessions
+        together, so retain the cumulative observability counters but never
+        retain buffered bytes.
+        """
+        self.buffer.clear()
+        self.stats["stream_resets"] += 1
+
     def feed(self, chunk: bytes, received_at: float | None = None) -> list[RtcmFrame]:
         now = time.monotonic() if received_at is None else received_at
         self.stats["input_bytes"] += len(chunk)

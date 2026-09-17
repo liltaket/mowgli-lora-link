@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install package and development tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install .
+      - name: Format check
+        run: python -m ruff format --check host tools
+      - name: Lint
+        run: python -m ruff check host tools
+      - name: Unit tests
+        run: python -m unittest discover -v
+      - name: Compile Python sources
+        run: python -m py_compile $(find host tools -type f -name '*.py' -print)
+      - name: Check whitespace errors
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --check "origin/${{ github.base_ref }}...HEAD"
+          else
+            git diff --check "${{ github.event.before }}..HEAD"
+          fi
+      - name: Check installed command entry points
+        run: |
+          set -eu
+          clean_dir="$(mktemp -d)"
+          cd "$clean_dir"
+          for command in \
+            mowgli-lora-base mowgli-lora-robot mowgli-lora-service-bench \
+            mowgli-lora-rtcm-inspect mowgli-lora-rtcm-compare \
+            mowgli-lora-rtcm-record mowgli-lora-rtcm-replay \
+            mowgli-lora-mowgli-rtcm; do
+            command -v "$command"
+            "$command" --help >/dev/null
+          done
+
+  firmware:
+    name: PlatformIO firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PlatformIO
+        run: python -m pip install platformio==6.2.0
+      - name: Build modem firmware
+        working-directory: firmware/lora_radio
+        run: pio run -e modem

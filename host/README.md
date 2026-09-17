@@ -11,13 +11,27 @@ Install on each Pi into an isolated environment:
 
 ```bash
 sudo useradd --system --home /nonexistent --shell /usr/sbin/nologin mowgli || true
+sudo apt-get update
+sudo apt-get install --yes python3-venv python3-dev
+sudo install -d -o root -g mowgli -m 0750 /etc/mowgli-lora
+sudo install -d -o "$USER" -g "$USER" -m 0755 /opt/mowgli-lora-link
 python3 -m venv /opt/mowgli-lora-link/.venv
-/opt/mowgli-lora-link/.venv/bin/pip install /opt/mowgli-lora-link
+/opt/mowgli-lora-link/.venv/bin/pip install .
+sudo chown -R root:root /opt/mowgli-lora-link
 sudo install -D -m 0644 host/systemd/mowgli-lora-base.service /etc/systemd/system/mowgli-lora-base.service
 sudo install -D -m 0644 host/config/base.example.yaml /etc/mowgli-lora/base.yaml
 sudo systemctl daemon-reload
 sudo systemctl enable --now mowgli-lora-base
 ```
+
+Run the venv and `pip install .` commands as the normal project user from a
+release checkout. The temporary user ownership makes that non-root build
+possible; the final `chown` makes the installed runtime root-owned and
+read-only to the service. The installed package does not depend on the checkout
+being present on `PYTHONPATH`. Keep configuration files owned by root and
+readable by the `mowgli` group. The units deliberately retain device access
+through `dialout`, network access for the local TCP/ROS bridge, and read-only
+access to the OS and application trees.
 
 Use the robot unit/configuration analogously. Before enabling either service,
 identify the correct board on that Pi:
@@ -41,6 +55,14 @@ nc 127.0.0.1 2233 > robot-output.rtcm3
 mowgli-lora-rtcm-inspect robot-output.rtcm3
 mowgli-lora-rtcm-compare capture.rtcm3 robot-output.rtcm3
 ```
+
+TCP and serial inputs reconnect inside the daemon with bounded exponential
+backoff. Each successful reopen starts a new input generation: parser state,
+queued complete frames, and unsent fragments from the previous source session
+are discarded. Source read timestamps travel with queued bytes so scheduler
+freshness is measured from actual ingress rather than from when the main loop
+eventually consumes them. A serial read timeout is treated as idle, not as a
+disconnect.
 
 For a deliberately bounded bench with two directly attached modems, use the
 same asynchronous services with generated RTCM3 transport fixtures:
@@ -97,10 +119,40 @@ Metrics are local HTTP endpoints: `/metrics` is Prometheus text and `/healthz`
 is JSON. The base default is `127.0.0.1:9608`, robot `127.0.0.1:9609`.
 Examples include USB/air stages, RTCM parser errors, reassembly expiry, stale
 queue drops, message types, bytes and output deliveries. Slow TCP readers have
-bounded per-client queues and are dropped with explicit metrics rather than
-corrupting or blocking other readers. Set `logging.level` in the configuration
-to a standard Python level such as `INFO` or `DEBUG`. View service logs via
-`journalctl -u mowgli-lora-base -f` or `journalctl -u mowgli-lora-robot -f`.
+frame-aware, byte-, count-, and freshness-bounded per-client queues and are
+dropped with explicit metrics rather than receiving old corrections or
+blocking other readers. The server also caps concurrent clients at 16 and
+rejects excess connections. The client must reconnect after such a drop.
+
+`/healthz` returns HTTP 200 with `status: ok` only when the modem is connected,
+the USB handshake is complete, and the firmware reports its radio ready. The
+base additionally requires its RTCM source to be connected. A temporary source
+outage therefore returns HTTP 503 with `status: degraded` while the process
+stays alive and reconnects. `/metrics` remains HTTP 200 independently.
+
+Metrics such as `usb_reconnects`, `rtcm_frames_ingested`, parser failures, and
+source connect/disconnect events are cumulative counters. Current-state values
+such as `modem_connected`, `modem_handshake_complete`, `modem_radio_ready`,
+`rtcm_source_connected`, queue depths, oldest queued age, and source last-data
+age are gauges. All exported Prometheus names have the `mowgli_lora_` prefix.
+Diagnostics polling is idle-only and is deferred during both pending RTCM work
+and recent radio receive activity.
+
+A missing `RADIO_TX_RESULT` after the bounded host deadline is an uncertain
+outcome: the packet may already have gone over the air. The service never
+retransmits it automatically. It abandons the remaining fragments of that RTCM
+frame, continues with later fresh corrections, and keeps a small expiring
+correlation set so a late terminal response is measured without completing or
+disturbing a newer send.
+
+The optional ROS bridge applies the same RTCM freshness deadline and discards
+queued corrections across a robot-side TCP reconnect. Its systemd unit uses
+`/run/mowgli-lora` for ROS logs so the service remains writable where required
+while `ProtectSystem=strict` is active.
+
+Set `logging.level` in the configuration to a standard Python level such as
+`INFO` or `DEBUG`. View service logs via `journalctl -u mowgli-lora-base -f` or
+`journalctl -u mowgli-lora-robot -f`.
 
 ## Safety and current limit
 

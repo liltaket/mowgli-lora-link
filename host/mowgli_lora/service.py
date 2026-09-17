@@ -9,11 +9,12 @@ import socket
 import sys
 import time
 from collections import deque
-from contextlib import closing
-from dataclasses import replace
+from collections.abc import Callable
+from contextlib import closing, contextmanager
+from dataclasses import dataclass, replace
 from pathlib import Path
-from queue import Empty, Queue
-from threading import Thread
+from queue import Empty, Full, Queue
+from threading import Lock, Thread
 
 from tools.lora_usb import application
 
@@ -57,6 +58,16 @@ class BaseService:
         self._update_rates(now)
         return len(frames)
 
+    def reset_source(self) -> None:
+        """Start a clean ingress epoch without reviving queued old corrections."""
+        self.parser.reset()
+        if self.queue:
+            self.metrics.add("rtcm_frames_dropped_source_reset", len(self.queue))
+            self.queue.clear()
+        if self.fragments:
+            self.metrics.add("rtcm_fragments_dropped_source_reset", len(self.fragments))
+            self.fragments.clear()
+
     def _update_rates(self, now: float) -> None:
         while self.input_rate and now - self.input_rate[0][0] >= 1.0:
             self.input_rate.popleft()
@@ -88,24 +99,32 @@ class BaseService:
 
     def step(self, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
-        self.transport.tick()
-        if self.transport.session != self.session:
-            # A modem restart invalidates modem-side state. Re-fragment only
-            # source frames that remain fresh under a new app sender session.
-            self.session, self.message_id = self.transport.session, 0
-            self.fragments.clear()
-            self.in_flight = None
-            self.metrics.add("app_sender_session_resets")
+        # Firmware diagnostics use the same single-command USB window as a
+        # fragment. Poll only when no application work was pending before this
+        # tick; a diagnostic must not add latency to RTCM.
+        self.transport.tick(diagnostics_idle=self.idle)
         for sequence, completed in self.transport.take_tx_outcomes():
             if sequence != self.in_flight:
                 self.metrics.add("radio_tx_unexpected_outcomes")
                 continue
             self.in_flight = None
-            if completed:
+            if completed is True:
                 self.metrics.add("rtcm_fragments_tx_completed")
-            else:
+            elif completed is False:
                 self.fragments.clear()
                 self.metrics.add("rtcm_fragments_tx_failed")
+            else:
+                self.fragments.clear()
+                self.metrics.add("rtcm_fragments_tx_uncertain")
+        if self.transport.session != self.session:
+            # A modem restart invalidates modem-side state. Re-fragment only
+            # source frames that remain fresh under a new app sender session.
+            # Consume any explicit failed outcome first so the loss remains
+            # observable rather than being mislabeled as unexpected.
+            self.session, self.message_id = self.transport.session, 0
+            self.fragments.clear()
+            self.in_flight = None
+            self.metrics.add("app_sender_session_resets")
         while self.queue and now - self.queue[0].received_at > 0.8:
             self.queue.popleft()
             self.metrics.add("rtcm_frames_dropped_stale")
@@ -155,31 +174,39 @@ class BaseService:
 
 
 class TcpRtcmOutput:
-    """Nonblocking broadcast with bounded per-client queues."""
+    """Nonblocking broadcast with frame-aware, freshness-bounded queues."""
 
-    MAX_CLIENT_QUEUE_BYTES = 256 * 1024
+    MAX_CLIENTS = 16
+    MAX_CLIENT_QUEUE_BYTES = 64 * application.MAX_RTCM_FRAME_SIZE
+    MAX_CLIENT_QUEUE_FRAMES = 64
+    CLIENT_QUEUE_TTL_S = application.RTCM_TRANSPORT_TTL_MS / 1000
 
     def __init__(self, bind: str, port: int, metrics: Metrics | None = None) -> None:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((bind, port))
-        self.socket.listen()
+        self.socket.listen(self.MAX_CLIENTS)
         self.socket.setblocking(False)
         self.metrics = metrics or Metrics()
-        self.clients: dict[socket.socket, bytearray] = {}
+        self.clients: dict[socket.socket, deque[_QueuedRtcmOutput]] = {}
 
     def _accept(self) -> None:
         try:
             while True:
                 client, _ = self.socket.accept()
+                if len(self.clients) >= self.MAX_CLIENTS:
+                    client.close()
+                    self.metrics.add("rtcm_tcp_clients_rejected_limit")
+                    continue
                 client.setblocking(False)
-                self.clients[client] = bytearray()
+                self.clients[client] = deque()
                 self.metrics.add("rtcm_tcp_clients_connected")
         except BlockingIOError:
             return
 
     def _drop(self, client: socket.socket, reason: str) -> None:
-        pending = len(self.clients.pop(client, b""))
+        frames = self.clients.pop(client, ())
+        pending = sum(frame.remaining for frame in frames)
         try:
             client.close()
         except OSError:
@@ -187,13 +214,21 @@ class TcpRtcmOutput:
         self.metrics.add(f"rtcm_tcp_client_dropped_{reason}")
         self.metrics.add("rtcm_tcp_client_bytes_abandoned", pending)
 
-    def flush(self) -> None:
+    def _queued_bytes(self, frames: deque[_QueuedRtcmOutput]) -> int:
+        return sum(frame.remaining for frame in frames)
+
+    def flush(self, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
         self._accept()
-        for client, pending in list(self.clients.items()):
-            if not pending:
+        for client, frames in list(self.clients.items()):
+            if not frames:
                 continue
+            if now - frames[0].enqueued_at >= self.CLIENT_QUEUE_TTL_S:
+                self._drop(client, "stale")
+                continue
+            pending = frames[0]
             try:
-                sent = client.send(pending)
+                sent = client.send(pending.raw[pending.offset :])
             except BlockingIOError:
                 continue
             except OSError:
@@ -202,23 +237,33 @@ class TcpRtcmOutput:
             if sent <= 0:
                 self._drop(client, "closed")
             else:
-                del pending[:sent]
+                pending.offset += sent
+                if pending.offset == len(pending.raw):
+                    frames.popleft()
                 self.metrics.add("rtcm_tcp_bytes_sent", sent)
         self.metrics.set(
-            "rtcm_tcp_client_queue_bytes", sum(map(len, self.clients.values()))
+            "rtcm_tcp_client_queue_bytes",
+            sum(self._queued_bytes(frames) for frames in self.clients.values()),
         )
 
-    def publish(self, raw: bytes) -> int:
+    def publish(self, raw: bytes, now: float | None = None) -> int:
+        now = time.monotonic() if now is None else now
         self._accept()
         delivered = 0
-        for client, pending in list(self.clients.items()):
-            if len(pending) + len(raw) > self.MAX_CLIENT_QUEUE_BYTES:
+        for client, frames in list(self.clients.items()):
+            if frames and now - frames[0].enqueued_at >= self.CLIENT_QUEUE_TTL_S:
+                self._drop(client, "stale")
+                continue
+            if (
+                len(frames) >= self.MAX_CLIENT_QUEUE_FRAMES
+                or self._queued_bytes(frames) + len(raw) > self.MAX_CLIENT_QUEUE_BYTES
+            ):
                 self._drop(client, "slow")
                 continue
-            pending.extend(raw)
+            frames.append(_QueuedRtcmOutput(raw, now))
             delivered += 1
             self.metrics.add("rtcm_tcp_bytes_queued", len(raw))
-        self.flush()
+        self.flush(now)
         return delivered
 
     def close(self) -> None:
@@ -262,7 +307,30 @@ class RobotService:
         self.metrics.set("rtcm_reassembly_conflicts", self.reassembler.conflict_count)
 
 
+@dataclass
+class _QueuedRtcmOutput:
+    raw: bytes
+    enqueued_at: float
+    offset: int = 0
+
+    @property
+    def remaining(self) -> int:
+        return len(self.raw) - self.offset
+
+
+@dataclass(frozen=True)
+class _InputChunk:
+    raw: bytes
+    received_at: float
+    generation: int = 0
+
+
 def _input_chunks(config: dict[str, object], stopped: list[bool]):
+    """Yield one ingress stream session.
+
+    Reconnection deliberately lives in :class:`_InputPump`; this helper's EOF
+    is a session boundary, not a process-lifetime boundary.
+    """
     typ = config.get("type", "stdin")
     if typ == "stdin":
         while not stopped[0]:
@@ -297,21 +365,214 @@ def _input_chunks(config: dict[str, object], stopped: list[bool]):
     raise ValueError("rtcm.input.type must be stdin, tcp, or serial")
 
 
+def _open_input_source(
+    config: dict[str, object],
+) -> tuple[object | None, Callable[[], bytes]]:
+    """Open exactly one source session and return its non-buffering reader."""
+    typ = config.get("type", "stdin")
+    if typ == "stdin":
+        return None, lambda: sys.stdin.buffer.read1(4096)
+    if typ == "tcp":
+        source = socket.create_connection((str(config["host"]), int(config["port"])))
+        source.settimeout(0.2)
+        return source, lambda: source.recv(4096)
+    if typ == "serial":
+        import serial
+
+        source = serial.Serial(
+            str(config["device"]), int(config.get("baudrate", 115200)), timeout=1
+        )
+        return source, lambda: source.read(4096)
+    raise ValueError("rtcm.input.type must be stdin, tcp, or serial")
+
+
+@dataclass(frozen=True)
+class _InputSessionStarted:
+    """Queue marker ensuring parser state cannot cross an ingress reconnect."""
+
+    generation: int = 0
+
+
 class _InputPump:
-    """Leaves blocking ingress in a daemon; service loop remains reconnectable."""
+    """Reconnect blocking RTCM ingress while the modem loop stays responsive."""
 
-    def __init__(self, config: dict[str, object], stopped: list[bool]) -> None:
-        self.queue: Queue[bytes | Exception | None] = Queue(maxsize=64)
-        self.thread = Thread(target=self._read, args=(config, stopped), daemon=True)
+    INITIAL_BACKOFF_SECONDS = 0.25
+    MAX_BACKOFF_SECONDS = 5.0
 
-    def _read(self, config: dict[str, object], stopped: list[bool]) -> None:
+    def __init__(
+        self,
+        config: dict[str, object],
+        stopped: list[bool],
+        metrics: Metrics | None = None,
+        *,
+        sleep=time.sleep,
+        monotonic=time.monotonic,
+    ) -> None:
+        self.queue: Queue[_InputChunk | _InputSessionStarted | Exception | None] = (
+            Queue(maxsize=64)
+        )
+        self.config, self.stopped = config, stopped
+        self.metrics = metrics or Metrics()
+        self._sleep, self._monotonic = sleep, monotonic
+        self._lock = Lock()
+        self._connected = False
+        self._last_data_at: float | None = None
+        self._generation = 0
+        self.thread = Thread(target=self._read, daemon=True)
+        self.metrics.set("rtcm_source_connected", 0)
+        self.metrics.set("rtcm_source_last_data_age_ms", -1)
+
+    def _set_connected(self, connected: bool) -> None:
+        with self._lock:
+            self._connected = connected
+        self.metrics.set("rtcm_source_connected", int(connected))
+
+    def tick_metrics(self, now: float | None = None) -> None:
+        now = self._monotonic() if now is None else now
+        with self._lock:
+            last_data_at = self._last_data_at
+        self.metrics.set(
+            "rtcm_source_last_data_age_ms",
+            -1 if last_data_at is None else max(0, int((now - last_data_at) * 1000)),
+        )
+
+    @property
+    def current_generation(self) -> int:
+        with self._lock:
+            return self._generation
+
+    def _next_generation(self) -> int:
+        with self._lock:
+            self._generation += 1
+            return self._generation
+
+    @contextmanager
+    def generation_guard(self):
+        """Linearize all queued work and sends against a session change."""
+        with self._lock:
+            yield self._generation
+
+    def _put(self, item: _InputChunk | _InputSessionStarted | Exception | None) -> bool:
+        """Do not let a full hand-off queue prevent a prompt shutdown."""
+        while not self.stopped[0]:
+            try:
+                self.queue.put(item, timeout=0.1)
+                return True
+            except Full:
+                continue
+        return False
+
+    def _discard_queued_input(self) -> tuple[int, int]:
+        dropped_chunks = 0
+        dropped_bytes = 0
+        while True:
+            try:
+                dropped = self.queue.get_nowait()
+            except Empty:
+                break
+            if isinstance(dropped, _InputChunk):
+                dropped_chunks += 1
+                dropped_bytes += len(dropped.raw)
+        if dropped_chunks:
+            self.metrics.add("rtcm_source_handoff_chunks_dropped", dropped_chunks)
+            self.metrics.add("rtcm_source_handoff_bytes_dropped", dropped_bytes)
+        return dropped_chunks, dropped_bytes
+
+    def _start_input_session(self) -> bool:
+        """Put the parser boundary ahead of any pending prior-session bytes."""
+        generation = self._next_generation()
+        dropped_chunks, _ = self._discard_queued_input()
+        if dropped_chunks:
+            self.metrics.add("rtcm_source_handoff_resets")
+        return self._put(_InputSessionStarted(generation))
+
+    def _put_fresh(self, chunk: bytes, received_at: float) -> bool:
+        """Prefer current bytes and force a parser boundary after overflow."""
+        generation = self.current_generation
+        item = _InputChunk(chunk, received_at, generation)
         try:
-            for chunk in _input_chunks(config, stopped):
-                self.queue.put(chunk)
-        except (OSError, RuntimeError, ValueError) as exc:
-            self.queue.put(exc)
-        finally:
-            self.queue.put(None)
+            self.queue.put_nowait(item)
+            return True
+        except Full:
+            pass
+
+        generation = self._next_generation()
+        item = _InputChunk(chunk, received_at, generation)
+        self._discard_queued_input()
+        self.metrics.add("rtcm_source_handoff_resets")
+        # The reset marker must precede retained bytes. If a consumer already
+        # took an old chunk, it will still encounter this boundary before the
+        # new chunk, so bytes from the two stream regions cannot be spliced.
+        self.queue.put_nowait(_InputSessionStarted(generation))
+        self.queue.put_nowait(item)
+        return True
+
+    def _read(self) -> None:
+        typ = self.config.get("type", "stdin")
+        backoff = self.INITIAL_BACKOFF_SECONDS
+        had_connection = False
+        while not self.stopped[0]:
+            source: object | None = None
+            connected = False
+            try:
+                source, read = _open_input_source(self.config)
+                connected = True
+                self._set_connected(True)
+                self.metrics.add("rtcm_source_connects")
+                if had_connection:
+                    self.metrics.add("rtcm_source_reconnects")
+                had_connection = True
+                if not self._start_input_session():
+                    return
+                while not self.stopped[0]:
+                    try:
+                        chunk = read()
+                    except TimeoutError:
+                        continue
+                    if not chunk and typ == "serial":
+                        # pyserial timeout is represented by b""; it is not a
+                        # device disconnect and must not churn the USB port.
+                        continue
+                    if not chunk:
+                        break
+                    if self.stopped[0]:
+                        return
+                    received_at = self._monotonic()
+                    with self._lock:
+                        self._last_data_at = received_at
+                    backoff = self.INITIAL_BACKOFF_SECONDS
+                    if not self._put_fresh(chunk, received_at):
+                        return
+                # A clean EOF is a disconnect for reconnectable sources.
+            except (OSError, RuntimeError) as exc:
+                self.metrics.add(
+                    "rtcm_source_read_failures"
+                    if connected
+                    else "rtcm_source_connect_failures"
+                )
+                LOG.warning("RTCM source unavailable: %s", exc)
+            except ValueError as exc:
+                # Bad static config cannot become healthy through reconnecting.
+                self._put(exc)
+                return
+            finally:
+                if connected:
+                    self.metrics.add("rtcm_source_disconnects")
+                self._set_connected(False)
+                if source is not None:
+                    try:
+                        source.close()  # type: ignore[attr-defined]
+                    except OSError:
+                        pass
+
+            if typ == "stdin":
+                self._put(None)
+                return
+            if self.stopped[0]:
+                return
+            self._sleep(backoff)
+            backoff = min(self.MAX_BACKOFF_SECONDS, backoff * 2)
+        self._put(None)
 
     def start(self) -> None:
         self.thread.start()
@@ -331,9 +592,10 @@ def _run_base(
         config.modem.reconnect_seconds,
     )
     service = BaseService(config, modem, metrics)
-    pump = input_pump_factory(config.rtcm_input, stopped)
+    pump = input_pump_factory(config.rtcm_input, stopped, metrics)
     pump.start()
     source_done = False
+    active_generation = pump.current_generation
     try:
         while not stopped[0]:
             try:
@@ -344,10 +606,35 @@ def _run_base(
                 raise item
             if item is None:
                 source_done = True
-            elif item:
-                service.ingest(item)
-            service.step()
-            if source_done and service.idle:
+            # Every service step shares the producer's generation lock. A
+            # reconnect therefore resets parser, queued frames, and unsent
+            # fragments before any later idle iteration can send old work,
+            # even if its reset marker is still waiting in the handoff queue.
+            with pump.generation_guard() as current_generation:
+                if current_generation != active_generation:
+                    active_generation = current_generation
+                    service.reset_source()
+                    metrics.add("rtcm_source_parser_resets")
+                if isinstance(item, _InputSessionStarted):
+                    if item.generation != current_generation:
+                        metrics.add("rtcm_source_handoff_markers_superseded")
+                elif isinstance(item, _InputChunk):
+                    if item.generation != current_generation:
+                        metrics.add("rtcm_source_handoff_chunks_superseded")
+                        metrics.add(
+                            "rtcm_source_handoff_bytes_superseded", len(item.raw)
+                        )
+                    else:
+                        service.ingest(item.raw, now=item.received_at)
+                service.step()
+            pump.tick_metrics()
+            # stdin has finite input; reconnectable TCP/serial sources keep
+            # their process alive across clean EOF and temporary outages.
+            if (
+                source_done
+                and config.rtcm_input.get("type", "stdin") == "stdin"
+                and service.idle
+            ):
                 break
     finally:
         modem.close()
@@ -387,7 +674,9 @@ def _main(role: str) -> None:
         level=config.logging_level, format="%(asctime)s %(levelname)s %(message)s"
     )
     metrics = Metrics()
-    server = serve_metrics(metrics, config.metrics_bind, config.metrics_port)
+    server = serve_metrics(
+        metrics, config.metrics_bind, config.metrics_port, role=config.role
+    )
     stopped = [False]
     signal.signal(signal.SIGTERM, lambda *_: stopped.__setitem__(0, True))
     signal.signal(signal.SIGINT, lambda *_: stopped.__setitem__(0, True))

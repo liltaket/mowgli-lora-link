@@ -5,8 +5,11 @@ from __future__ import annotations
 import argparse
 import logging
 import socket
+import time
 from queue import Empty, Full, Queue
 from threading import Event, Thread
+
+from tools.lora_usb.application import RTCM_TRANSPORT_TTL_MS
 
 from .rtcm import RtcmFrame, RtcmStreamParser
 
@@ -32,10 +35,12 @@ class RtcmTcpReader:
         *,
         queue_size: int = 128,
         reconnect_seconds: float = 1.0,
+        monotonic=time.monotonic,
     ) -> None:
         self.host = host
         self.port = port
         self.reconnect_seconds = reconnect_seconds
+        self._monotonic = monotonic
         self.frames: Queue[RtcmFrame] = Queue(maxsize=queue_size)
         self.stop_event = Event()
         self.thread = Thread(target=self._run, daemon=True)
@@ -50,14 +55,29 @@ class RtcmTcpReader:
         self.stop_event.set()
         self.thread.join(timeout=2.0)
 
-    def take(self, limit: int = 64) -> list[RtcmFrame]:
+    def take(self, limit: int = 64, *, now: float | None = None) -> list[RtcmFrame]:
+        """Return only frames that still fit the application freshness TTL."""
+        now = self._monotonic() if now is None else now
         output = []
         for _ in range(limit):
             try:
-                output.append(self.frames.get_nowait())
+                frame = self.frames.get_nowait()
             except Empty:
                 break
+            if now - frame.received_at >= RTCM_TRANSPORT_TTL_MS / 1000:
+                self.frames_dropped += 1
+                continue
+            output.append(frame)
         return output
+
+    def _drop_queued_frames(self) -> None:
+        """A TCP reconnect is a source-session boundary, not a continuation."""
+        while True:
+            try:
+                self.frames.get_nowait()
+                self.frames_dropped += 1
+            except Empty:
+                return
 
     def _put_fresh(self, frame: RtcmFrame) -> None:
         try:
@@ -73,6 +93,10 @@ class RtcmTcpReader:
     def _run(self) -> None:
         while not self.stop_event.is_set():
             parser = RtcmStreamParser()
+            # Never publish a complete frame from an old TCP connection after
+            # source restart/reconnect. Its ROS timestamp would otherwise make
+            # an old correction look newly received.
+            self._drop_queued_frames()
             try:
                 with socket.create_connection(
                     (self.host, self.port), timeout=2.0
@@ -91,6 +115,11 @@ class RtcmTcpReader:
             except OSError as exc:
                 self.connect_failures += 1
                 LOG.warning("RTCM TCP input unavailable: %s", exc)
+            finally:
+                # EOF/reset is the source boundary. Drop the closed session's
+                # queued frames before the reconnect wait gives the ROS timer
+                # any opportunity to publish them under a fresh timestamp.
+                self._drop_queued_frames()
             self.stop_event.wait(self.reconnect_seconds)
 
 

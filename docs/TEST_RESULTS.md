@@ -19,9 +19,16 @@ or safety controller.
 
 ## Automated protocol checks
 
-- 48 Python unit tests passed, covering the USB/application protocols, modem
-  reconnect/session handling, RTCM3 parsing and tools, the two Pi services,
-  bounded TCP output, and the optional Mowgli ROS 2 adapter.
+- 103 Python unit and integration tests passed, covering the USB/application
+  protocols, modem reconnect/session/late-result handling, TCP and serial RTCM
+  source recovery, health state, randomized RTCM3 parsing, the two Pi services,
+  bounded TCP output, systemd units, and the optional Mowgli ROS 2 adapter.
+- The real localhost TCP integration starts with no server, reconnects after it
+  appears, discards a partial frame across EOF, reconnects after restart, and
+  recovers the next complete frame byte-for-byte.
+- The simulated end-to-end service test covers latency, packet loss,
+  duplication, reordering, disconnect/reconnect, sender-session restart, and a
+  60-epoch nominal stream without unbounded queues.
 - The deterministic fault test passed reorder, duplicate, missing-fragment
   timeout, conflicting-fragment, CRC corruption, and next-frame recovery.
 - The ESP32-S3 modem firmware built successfully with 22,520 bytes RAM (6.9%)
@@ -127,5 +134,30 @@ physical run passed:
 This result proves the asynchronous Pi-service transport on the two table-top
 USB modems at that bounded synthetic load. It does not prove 1 Hz capacity,
 real GNSS correction quality, Raspberry Pi deployment, RF range, or continuous
-EU868 compliance. No further RF test was run after this result in order to
-keep the session's aggregate test airtime bounded.
+EU868 compliance.
+
+The later host-hardening regression retained two failed runs rather than
+masking them. The first delivered 61/62 RTCM3 frames: the base completed all
+182 transmissions, while the robot modem received and wrote 181 radio events
+to USB with no USB queue drop. The second delivered 43/62 frames after two
+host response deadlines expired; the modem later reported all 126 accepted
+transmissions complete and both delayed `RADIO_TX_RESULT` frames arrived. That
+second run exposed a real accounting bug: an expired host deadline was being
+reported as a proven transmission failure. The hardened transport now records
+that state as uncertain, never retransmits the possibly-sent payload, abandons
+the rest of that RTCM frame, and observes any late terminal response through a
+bounded expiring correlation set without disturbing a newer send.
+
+After that fix, one final bounded 20-second regression at 0.75 synthetic
+epochs per second passed the strict hardened acceptance gate:
+
+- 62/62 complete RTCM3 frames arrived byte-for-byte in source order.
+- 182/182 RTCM fragments were transmitted, received, decoded, accepted, and
+  reassembled.
+- There were zero host response timeouts or uncertain outcomes, stale drops,
+  CRC failures, reassembly conflicts/timeouts, rejected fragments, and modem
+  errors.
+
+No further RF run was made. The failed runs remain part of the evidence, and
+the final pass remains only a short table-top transport regression under the
+same limitations stated above.

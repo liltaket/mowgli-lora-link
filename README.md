@@ -78,6 +78,11 @@ python3 -m venv .venv
 .venv/bin/mowgli-lora-robot --config host/config/robot.example.yaml
 ```
 
+For a Pi deployment, use the clean-install procedure in
+[`host/README.md`](host/README.md). The systemd units run the installed console
+commands from the virtual environment, so they do not rely on `PYTHONPATH` or
+the source checkout at runtime.
+
 See [`host/README.md`](host/README.md) for stable USB paths, systemd units,
 metrics, real RTCM record/inspect/replay, and the non-ROS end-to-end check.
 

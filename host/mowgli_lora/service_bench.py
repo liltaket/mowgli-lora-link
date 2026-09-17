@@ -29,6 +29,23 @@ class CaptureOutput:
         return
 
 
+def _error_counts(
+    base_snapshot: dict[str, int | float],
+    robot_snapshot: dict[str, int | float],
+) -> dict[str, int | float]:
+    return {
+        "base_tx_failed": base_snapshot.get("rtcm_fragments_tx_failed", 0),
+        "base_tx_uncertain": base_snapshot.get("rtcm_fragments_tx_uncertain", 0),
+        "base_stale": base_snapshot.get("rtcm_fragments_dropped_stale", 0)
+        + base_snapshot.get("rtcm_frames_dropped_stale", 0),
+        "base_response_timeouts": base_snapshot.get("usb_response_timeouts", 0),
+        "base_modem_errors": base_snapshot.get("modem_errors", 0),
+        "robot_rejected": robot_snapshot.get("rtcm_fragments_rejected", 0),
+        "robot_timeouts": robot_snapshot.get("rtcm_reassembly_timeouts", 0),
+        "robot_modem_errors": robot_snapshot.get("modem_errors", 0),
+    }
+
+
 def run(base_port: str, robot_port: str, duration_s: float, rtcm_hz: float) -> dict:
     base_metrics, robot_metrics = Metrics(), Metrics()
     base_transport = ModemTransport(base_port, base_metrics)
@@ -67,14 +84,7 @@ def run(base_port: str, robot_port: str, duration_s: float, rtcm_hz: float) -> d
     comparison = compare_frames(source, output.frames)
     base_snapshot = base_metrics.snapshot()
     robot_snapshot = robot_metrics.snapshot()
-    errors = {
-        "base_tx_failed": base_snapshot.get("rtcm_fragments_tx_failed", 0),
-        "base_stale": base_snapshot.get("rtcm_fragments_dropped_stale", 0),
-        "base_modem_errors": base_snapshot.get("modem_errors", 0),
-        "robot_rejected": robot_snapshot.get("rtcm_fragments_rejected", 0),
-        "robot_timeouts": robot_snapshot.get("rtcm_reassembly_timeouts", 0),
-        "robot_modem_errors": robot_snapshot.get("modem_errors", 0),
-    }
+    errors = _error_counts(base_snapshot, robot_snapshot)
     return {
         "mode": "physical-pi-service",
         "duration_s": duration_s,
