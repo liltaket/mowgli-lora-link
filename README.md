@@ -8,11 +8,11 @@ Both boards run the same modem image. BASE and ROBOT are host-side roles.
 base host -> USB -> ESP32-S3/SX1262 )) LoRa (( SX1262/ESP32-S3 -> USB -> robot host
 ```
 
-The repository currently contains the radio modem, its binary USB contract,
-mock hosts, and a versioned application-protocol test layer for remote STOP
-requests, compact telemetry, and freshness-aware RTCM3 fragmentation. Future
-Raspberry Pi adapters will live here, but no Pi, ROS 2, GNSS receiver, or real
-mower-control integration is included yet.
+The repository contains the radio modem, its binary USB contract, mock hosts,
+a versioned application protocol, and reusable Linux/Raspberry Pi services for
+validated RTCM3 ingress and output. An optional ROS 2 bridge publishes the
+robot-side stream to MowgliNext's Universal GNSS ingress. No real mower control
+is enabled.
 
 > [!WARNING]
 > This is prototype communication software. It is unauthenticated, has no
@@ -64,9 +64,22 @@ Run the pure tests:
 
 ```bash
 python3 -m unittest discover -v
-ruff check tools
-python3 -m py_compile tools/lora_usb/*.py
+ruff check host tools
+python3 -m py_compile $(find host tools -name '*.py')
 ```
+
+Install the Pi host commands from the repository root:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install .
+.venv/bin/mowgli-lora-base --config host/config/base.example.yaml
+# or, on the robot:
+.venv/bin/mowgli-lora-robot --config host/config/robot.example.yaml
+```
+
+See [`host/README.md`](host/README.md) for stable USB paths, systemd units,
+metrics, real RTCM record/inspect/replay, and the non-ROS end-to-end check.
 
 The mixed STOP/telemetry/RTCM runner and its safe test modes are documented in
 [`tools/lora_usb/README.md`](tools/lora_usb/README.md).
@@ -90,6 +103,8 @@ operation requires a separate EU868 duty-cycle/LBT/AFA and channel-plan review.
 - [Application protocol](docs/lora/APPLICATION_PROTOCOL.md)
 - [Initial physical bench evidence](docs/lora/PHASE2_BENCH.md)
 - [Current mixed-traffic test results](docs/TEST_RESULTS.md)
+- [MowgliNext integration contract](docs/MOWGLI_INTEGRATION.md)
+- [Security and EU868 design boundary](docs/SECURITY_AND_EU868.md)
 - [Roadmap and integration boundary](docs/ROADMAP.md)
 
 ## Repository status and license

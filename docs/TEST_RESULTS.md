@@ -19,14 +19,16 @@ or safety controller.
 
 ## Automated protocol checks
 
-- 20 Python unit tests passed.
+- 48 Python unit tests passed, covering the USB/application protocols, modem
+  reconnect/session handling, RTCM3 parsing and tools, the two Pi services,
+  bounded TCP output, and the optional Mowgli ROS 2 adapter.
 - The deterministic fault test passed reorder, duplicate, missing-fragment
   timeout, conflicting-fragment, CRC corruption, and next-frame recovery.
-- The ESP32-S3 modem firmware built successfully with 22,496 bytes RAM (6.9%)
-  and 295,125 bytes flash (8.8%).
+- The ESP32-S3 modem firmware built successfully with 22,520 bytes RAM (6.9%)
+  and 295,445 bytes flash (8.8%).
 - The same built image was flashed successfully to both boards. Its firmware
   binary SHA-256 is
-  `beb679d1ece45e8482a997986de225ac2fb9a531cb108d9c06659ca97abe66e1`.
+  `7236f033d66a3e7eb534ddcac649ed112814843ca427f455ef89943e8f5e540b`.
 
 ## Twelve-minute event-time simulation
 
@@ -72,3 +74,58 @@ The 600-second low-duty physical run passed:
 This longer profile used 0.5 Hz telemetry and one rotating RTCM observation
 message every 10 seconds. It proves the bounded mixed-message path at that
 load; it does not turn the failed physical nominal-rate trials into a pass.
+
+## Instrumented nominal-rate diagnosis
+
+A later 15-second nominal run used additive modem and host stage counters. It
+remained an expected failed capacity test and was not repeated after the trace
+was conclusive:
+
+- 173 radio transmissions completed.
+- 173 valid radio packets were received.
+- 173 `RADIO_RX` events were queued and written to USB.
+- 173 radio events were decoded by the host.
+- 172 were matched by the synchronous per-send bench correlation.
+- The scheduler offered 182 RTCM fragments, but only 169 were transmitted
+  before freshness deadlines; transaction p95 was 72.7 ms.
+- Estimated RF airtime was 9.32 seconds in 15 seconds, roughly 62% occupancy.
+- STOP still applied and acknowledged 2/2 unique requests.
+
+The original symptom therefore combines two effects. One decoded event became
+stale or out-of-order relative to the synchronous bench wait, but the larger
+logical RTCM loss is offered load above the effective single-packet transaction
+capacity. There is no evidence of RF loss or ESP USB-queue loss in this run.
+The current 1 Hz synthetic profile is not a stable or regulatory-approved
+physical operating point. The reusable Pi service uses asynchronous receive
+processing; a compliant lower-airtime PHY or channel-access design must be
+selected before continuous deployment.
+
+## Reduced-rate synchronous and Pi-service checks
+
+A 20-second synchronous mixed-bench run at 0.75 observation epochs per second
+still failed its strict acceptance threshold. The radios and modem queues did
+not lose packets: the base completed 178 transmissions, the robot received all
+178 valid packets, all 178 `RADIO_RX` events were written to USB and decoded by
+the host, but only 177 were matched by the synchronous per-send wait. The
+one-second wait then delayed the scheduler enough to expire later work. The
+result was 58/62 logical RTCM3 messages, 14/15 complete epochs, 38/40 telemetry
+messages, and 3/3 acknowledged mock STOP requests. Estimated airtime was 9.74
+seconds. This is a host-test correlation/backpressure failure, not measured RF
+loss.
+
+The production-shaped asynchronous base and robot services were then exercised
+once for 20 seconds at the same 0.75 Hz synthetic RTCM profile. That bounded
+physical run passed:
+
+- 62/62 complete RTCM3 frames arrived byte-for-byte in source order.
+- 182/182 RTCM fragments were transmitted, received, decoded, accepted, and
+  reassembled.
+- Delivery ratio was 1.0 with zero missing or unexpected frames.
+- There were no CRC failures, stale drops, reassembly conflicts/timeouts,
+  rejected frames, or modem errors.
+
+This result proves the asynchronous Pi-service transport on the two table-top
+USB modems at that bounded synthetic load. It does not prove 1 Hz capacity,
+real GNSS correction quality, Raspberry Pi deployment, RF range, or continuous
+EU868 compliance. No further RF test was run after this result in order to
+keep the session's aggregate test airtime bounded.

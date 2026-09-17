@@ -1,0 +1,20 @@
+[Unit]
+Description=Mowgli LoRa base RTCM bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mowgli
+Group=mowgli
+SupplementaryGroups=dialout
+Environment=PYTHONPATH=/opt/mowgli-lora-link
+ExecStart=/opt/mowgli-lora-link/.venv/bin/mowgli-lora-base --config /etc/mowgli-lora/base.yaml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

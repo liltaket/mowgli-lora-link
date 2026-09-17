@@ -1,0 +1,19 @@
+[Unit]
+Description=Publish Mowgli LoRa RTCM to Universal GNSS
+After=mowgli-lora-robot.service
+Requires=mowgli-lora-robot.service
+
+[Service]
+Type=simple
+User=mowgli
+Group=mowgli
+EnvironmentFile=/etc/mowgli-lora/mowgli-ros.env
+ExecStart=/bin/bash -c 'source "$ROS_SETUP" && source "$MOWGLI_SETUP" && exec /opt/mowgli-lora-link/.venv/bin/mowgli-lora-mowgli-rtcm --host "$RTCM_HOST" --port "$RTCM_PORT" --topic "$RTCM_TOPIC"'
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
