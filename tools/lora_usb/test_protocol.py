@@ -55,6 +55,10 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(rx[-1], b"x")
         status = parse_link_status(struct.pack(">IIB3xIIIIII", *range(1, 10)))
         self.assertEqual(status, (1, 2, 3, 4, 5, 6, 7, 8, 9))
+        self.assertEqual(
+            parse_diagnostics(struct.pack(">IIIIIIIIII", *range(10))),
+            tuple(range(10)),
+        )
         self.assertEqual(parse_error(struct.pack(">HhB", 2, -4, 3)), (2, -4, 3))
 
     def test_client_preserves_event_and_filters_sessions(self):
@@ -106,12 +110,15 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(parse_tx_result(result.payload), (1, 2, 3))
         self.assertEqual(len(events), 1)
         self.assertEqual(client.counters["wrong_session"], 1)
+        self.assertEqual(client.counters["radio_rx_events"], 1)
+        self.assertEqual(client.counters["radio_rx_events_matched"], 0)
 
     def test_take_radio_event_preserves_unmatched_event(self):
         client = ModemClient.__new__(ModemClient)
         first = Frame(RADIO_RX, 1, 0, b"first")
         second = Frame(RADIO_RX, 1, 0, b"second")
         client.inbox = [first, second]
+        client.counters = {}
         client.poll = lambda: client.inbox
 
         found = client.take_radio_event(lambda frame: frame.payload == b"second")

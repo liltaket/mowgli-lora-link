@@ -1,3 +1,5 @@
+import contextlib
+import io
 import unittest
 
 from .application import (
@@ -14,6 +16,7 @@ from .mixed_bench import (
     Scheduler,
     SimulatedTransport,
     WorkItem,
+    main,
     run_fault_test,
     validate_physical_guard,
 )
@@ -42,6 +45,14 @@ class SchedulerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_physical_guard("low-duty", 901)
 
+    def test_invalid_rtcm_rates_are_rejected(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            for value in ("0", "-1", "inf", "nan"):
+                with self.subTest(value=value), self.assertRaises(SystemExit):
+                    main(["--fault-test", "--rtcm-hz", value])
+            with self.assertRaises(SystemExit):
+                main(["--profile", "low-duty", "--rtcm-hz", "0.5"])
+
 
 class MixedRunnerTests(unittest.TestCase):
     def test_sixty_second_nominal_capacity(self):
@@ -52,6 +63,16 @@ class MixedRunnerTests(unittest.TestCase):
         self.assertEqual(report["stop"]["applied"], 3)
         self.assertGreaterEqual(report["rtcm"]["completion_ratio"], 0.99)
         self.assertGreaterEqual(report["telemetry"]["delivery_ratio"], 0.99)
+
+    def test_nominal_rtcm_rate_is_configurable(self):
+        report = MixedRunner(SimulatedTransport(), "nominal", 10, 0, 0, 7, 0.5).run()
+        self.assertTrue(report["pass"], report)
+        self.assertEqual(report["rtcm_hz"], 0.5)
+        self.assertEqual(report["rtcm"]["observation_epochs_offered"], 5)
+
+    def test_low_duty_reports_actual_rate(self):
+        report = MixedRunner(SimulatedTransport(), "low-duty", 10, 0, 0, 7).run()
+        self.assertEqual(report["rtcm_hz"], 0.1)
 
     def test_fault_recovery(self):
         report = run_fault_test()

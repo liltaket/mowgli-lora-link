@@ -55,6 +55,11 @@ python3 -m tools.lora_usb.mixed_bench \
   --report reports/sim-nominal-720s.json
 ```
 
+Use `--rtcm-hz RATE` with the nominal simulator to explore lower offered loads.
+The flag rejects non-finite/non-positive values and does not apply to the fixed
+low-duty profile. A simulated capacity result is not physical or regulatory
+proof.
+
 Run deterministic duplicate, reorder, missing-fragment, conflict, CRC, and
 recovery checks with:
 

@@ -10,6 +10,11 @@ only COBS-delimited binary frames with CRC16; do not attach a line-oriented
 serial monitor while a host test owns the modem port. `RADIO_TX_RESULT` proves
 only local SX1262 TX completion, never remote delivery.
 
+`GET_DIAGNOSTICS` exposes additive per-stage counters for USB requests, radio
+TX/RX, RX-event queueing, and complete USB writes without changing the original
+`LINK_STATUS` payload. This is intended for loss localization, not application
+control.
+
 ## Hardware and RF boundary
 
 Use an antenna on each radio before any transmission. Kit wiring is SCK=7,
