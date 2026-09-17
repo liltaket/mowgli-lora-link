@@ -157,8 +157,8 @@ The prototype scheduler chooses one packet at a time in this order:
 3. latest telemetry;
 4. earliest-deadline RTCM fragment.
 
-At SF5/BW250/CR4/5 with a 12-symbol preamble, the nominal RTCM plus 2 Hz
-telemetry profile consumes roughly 66% of RF airtime before interference,
+At SF5/BW500/CR4/5 with a 12-symbol preamble, the nominal RTCM plus 2 Hz
+telemetry profile consumes roughly 33% of RF airtime before interference,
 retries, or distributed-host contention. This may be technically measurable
 in a short bounded test, but it is not approved for continuous EU868 use.
 Long full-rate tests therefore run in the simulator; physical full-rate tests

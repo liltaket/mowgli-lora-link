@@ -7,11 +7,12 @@ approval.
 
 ## What the test data means
 
-The RTCM3 frames below are synthetic transport fixtures. They use valid RTCM3
-framing, message-type fields, representative lengths, and CRC24Q, but their
-payloads are not real observations or corrections from a triple-band GNSS
-receiver. The tests therefore exercise scheduling, freshness, fragmentation,
-reassembly, and error handling only.
+Unless a section explicitly says live RTCM, the RTCM3 frames below are
+synthetic transport fixtures. They use valid RTCM3 framing, message-type
+fields, representative lengths, and CRC24Q, but their payloads are not real
+observations or corrections from a triple-band GNSS receiver. Those tests
+therefore exercise scheduling, freshness, fragmentation, reassembly, and
+error handling only.
 
 `STOP_REQUEST` changes an in-memory mock robot state and returns a typed
 acknowledgement. It is not connected to a mower, motor, blade, ROS 2 service,
@@ -49,6 +50,37 @@ The nominal scheduler profile completed 720 seconds of event time:
 - No errors, queue drops, stale fragments, reassembly timeouts, or conflicts.
 - Estimated RF airtime was 478.52 seconds, about 66% of the interval. This is
   why a long physical nominal-rate run is intentionally prohibited.
+
+## In-house live-RTCM range and capacity check
+
+A later bounded test put the two endpoints on separate hosts across a house and
+used the RTK base station's live RTCM3 TCP output rather than generated test
+fixtures. Both modems ran 868.3 MHz, 500 kHz, SF5, CR4/5, a 12-symbol preamble,
+and +10 dBm configured conducted output power.
+The firmware binary used for the final profile has SHA-256
+`d4cdda188efbd898e5257c23d65c8f0d37a8fe0a839f082e375f89634464ea3d`.
+
+The 20-second receive capture contained 269 complete RTCM3 frames, 40,790
+bytes, and all 14 message types offered by the receiver: 1005, 1019, 1020,
+1042, 1044, 1045, 1046, 1077, 1087, 1097, 1107, 1117, 1127, and 1230. The
+timed part of the capture lasted 19.069 seconds and averaged 2,139 bytes/s,
+with a peak one-second bucket of 2,219 bytes/s. Every delivered frame passed
+CRC24Q validation.
+
+Across this run the robot host accepted 421/421 radio fragments reported by
+the robot modem, with zero modem event drops, reassembly conflicts, or
+reassembly timeouts. At the 18-second base snapshot, 379 fragments had
+completed transmission and the live source was producing 14 frames/s; only
+five complete frames, one fragment, and one in-flight fragment remained in
+the bounded scheduler. The capture contained 19 consecutive instances of
+every RTCM type, plus one additional instance of types 1005, 1019, and 1020 at
+the capture boundary.
+
+This proves that this particular indoor link and asynchronous USB host path
+kept pace with the base station's live 1 Hz multi-constellation RTCM stream
+during the bounded run. It does not validate correction contents, rover fix
+quality, outdoor range, interference tolerance, continuous operation, antenna
+ERP, or regulatory compliance.
 
 ## Physical tests
 

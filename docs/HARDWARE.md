@@ -38,10 +38,10 @@ limited link.
 | Parameter | Value |
 | --- | ---: |
 | Frequency | 868.3 MHz |
-| Bandwidth | 250 kHz |
+| Bandwidth | 500 kHz |
 | Spreading factor | 5 |
 | Coding rate | 4/5 |
-| Output power | +2 dBm |
+| Output power | +10 dBm |
 | Preamble | 12 symbols |
 | Sync word | RadioLib private LoRa sync word |
 | PHY CRC | enabled |

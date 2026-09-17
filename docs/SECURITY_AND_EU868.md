@@ -45,20 +45,21 @@ Primary standards:
 
 ## Current 868.3 MHz profile
 
-The present bench profile is 868.3 MHz, 250 kHz, SF5, CR4/5, +2 dBm radio
-setting, and about 66% aggregate airtime at the synthetic nominal RTCM load.
+The present bench profile is 868.3 MHz, 500 kHz, SF5, CR4/5, +10 dBm radio
+setting, and about 33% aggregate airtime at the synthetic nominal RTCM load.
 It is not approved for continuous operation.
 
-For Sweden, 868.3 MHz/BW250 lies within the 868.0–868.6 MHz range in
+For Sweden, a nominal 500 kHz signal centered at 868.3 MHz spans
+868.05–868.55 MHz within the 868.0–868.6 MHz range in
 PTSFS 2025:1 section 141: at most 25 mW ERP and at most 1% duty cycle, or
 channel access that provides at least equivalent performance. The radio's
-+2 dBm setting is conducted output configuration, not measured ERP.
++10 dBm setting is conducted output configuration, not measured ERP.
 
 EN 300 220-2 V3.3.1 polite access still imposes clear-channel assessment,
 transmission/dialogue/off-time rules, and a 100 seconds/hour limit per 200 kHz.
 LoRa CAD detects LoRa activity and is not by itself a calibrated all-signal
 energy detector or compliance proof. LBT/AFA cannot make the current roughly
-66% single-channel traffic unrestricted.
+33% single-channel traffic unrestricted.
 
 ## Lower-power band candidate
 

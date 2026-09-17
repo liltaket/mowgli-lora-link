@@ -91,13 +91,13 @@ The mixed STOP/telemetry/RTCM runner and its safe test modes are documented in
 
 ## RF and regulatory boundary
 
-The current shared bench profile is 868.3 MHz, 250 kHz bandwidth, SF5,
-CR 4/5, +2 dBm, private sync word, LoRa PHY CRC, and a 12-symbol preamble.
-It is technically exercised on a table only; it is not an approved EU868
-channel-access design.
+The current shared bench profile is 868.3 MHz, 500 kHz bandwidth, SF5,
+CR 4/5, +10 dBm, private sync word, LoRa PHY CRC, and a 12-symbol preamble.
+It is technically exercised only in bounded bench and indoor tests; it is not
+an approved EU868 channel-access design.
 
 The nominal synthetic multi-constellation RTCM profile is about 1.7 kB/s and
-would occupy roughly 66% of RF airtime with this profile. Do **not** run a long
+would occupy roughly 33% of RF airtime with this profile. Do **not** run a long
 over-the-air full-rate soak merely because the modem can encode it. Continuous
 operation requires a separate EU868 duty-cycle/LBT/AFA and channel-plan review.
 

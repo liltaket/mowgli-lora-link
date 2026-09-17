@@ -19,8 +19,8 @@ control.
 
 Use an antenna on each radio before any transmission. Kit wiring is SCK=7,
 MISO=8, MOSI=9, NSS=41, DIO1=39, RESET=42, BUSY=40. The bench profile is
-868.3 MHz, 250 kHz, SF5, CR4/5, a 12-symbol preamble, private sync word, PHY
-CRC, and +2 dBm.
+868.3 MHz, 500 kHz, SF5, CR4/5, a 12-symbol preamble, private sync word, PHY
+CRC, and +10 dBm.
 It is prototype-only and regulatory-unverified; it is not a range, EU868,
 coexistence, duty-cycle, or production-link claim.
 
