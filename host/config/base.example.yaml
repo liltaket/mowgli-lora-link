@@ -1,0 +1,16 @@
+role: base
+modem:
+  # Find this with: ls -l /dev/serial/by-id/
+  device: /dev/serial/by-id/usb-Espressif_XIAO_ESP32S3_BASE-if00
+  baudrate: 115200
+  reconnect_seconds: 1
+rtcm:
+  input:
+    type: tcp
+    host: 127.0.0.1
+    port: 2101
+metrics:
+  bind: 127.0.0.1
+  port: 9608
+logging:
+  level: INFO

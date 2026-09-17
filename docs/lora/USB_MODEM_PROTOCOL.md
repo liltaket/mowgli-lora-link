@@ -67,6 +67,8 @@ active session and sequence zero.
 | `0x90` | `RADIO_RX` | modem -> host | `sender_boot_id:u32, air_sequence:u32, rssi_centi_dbm:i16, snr_centi_db:i16, receive_uptime_ms:u32, opaque_payload[]` |
 | `0x03` | `GET_LINK_STATUS` | host -> modem | empty |
 | `0x83` | `LINK_STATUS` | modem -> host | `boot_id:u32, uptime_ms:u32, radio_state:u8, reserved[3], tx_ok:u32, rx_ok:u32, rx_bad:u32, usb_bad:u32, radio_errors:u32, usb_event_drops:u32` |
+| `0x04` | `GET_DIAGNOSTICS` | host -> modem | empty |
+| `0x84` | `DIAGNOSTICS` | modem -> host | ten `u32` values described below |
 | `0xff` | `ERROR` | modem -> host | `code:u16, driver_detail:i16, rejected_type:u8` |
 
 Capability bits are `OPAQUE_RADIO=1<<0`, `RX_METRICS=1<<1`,
@@ -80,6 +82,29 @@ correlated error.
 `RADIO_TX_RESULT` proves only that the local radio finished transmitting. It
 is not a peer delivery acknowledgement. A host timeout leaves the transmission
 outcome unknown and must not cause an automatic retransmission.
+
+### Diagnostic stage counters
+
+`DIAGNOSTICS` is an additive troubleshooting extension. It does not change
+the published `LINK_STATUS` layout. Its 40-byte payload contains these
+big-endian `u32` values in order:
+
+1. integrity-valid USB frames received;
+2. USB commands accepted by the active session;
+3. valid `RADIO_SEND` commands accepted;
+4. radio transmissions started;
+5. radio transmissions completed successfully;
+6. valid radio packets received;
+7. `RADIO_RX` events placed in the USB queue;
+8. `RADIO_RX` events written to USB CDC;
+9. USB event drops;
+10. current USB output queue depth.
+
+The first nine values are wrapping counters; hosts calculate deltas modulo
+`2^32`. Queue depth is a snapshot, not a counter. An accepted diagnostics
+request itself increments the first two counters before its response is
+created. All values reset when the ESP restarts, which is visible through the
+separate boot ID returned by `INFO` and `LINK_STATUS`.
 
 ## Radio envelope
 

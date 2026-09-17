@@ -10,7 +10,10 @@ MAX_USB_PAYLOAD = 256
 MAX_DECODED = 274
 
 HELLO, INFO, RADIO_SEND, RADIO_TX_RESULT = 0x01, 0x81, 0x02, 0x82
-RADIO_RX, GET_LINK_STATUS, LINK_STATUS, ERROR = 0x90, 0x03, 0x83, 0xFF
+GET_LINK_STATUS, LINK_STATUS = 0x03, 0x83
+GET_DIAGNOSTICS, DIAGNOSTICS = 0x04, 0x84
+RADIO_RX, ERROR = 0x90, 0xFF
+ERROR_CODE_WRONG_SESSION = 4
 
 
 class ProtocolError(ValueError):
@@ -193,6 +196,13 @@ def parse_link_status(p):
         raise ProtocolError("bad LINK_STATUS payload")
     boot, uptime, state = struct.unpack_from(">IIB", p)
     return (boot, uptime, state) + struct.unpack_from(">IIIIII", p, 12)
+
+
+def parse_diagnostics(p):
+    """Decode modem stage counters returned by GET_DIAGNOSTICS (0x04)."""
+    if len(p) != 40:
+        raise ProtocolError("bad DIAGNOSTICS payload")
+    return struct.unpack(">IIIIIIIIII", p)
 
 
 def parse_error(p):

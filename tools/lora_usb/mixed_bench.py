@@ -46,7 +46,12 @@ from .application import (
     synthetic_epoch,
     synthetic_rtcm,
 )
-from .protocol import parse_info, parse_link_status, parse_radio_rx
+from .protocol import (
+    parse_diagnostics,
+    parse_info,
+    parse_link_status,
+    parse_radio_rx,
+)
 
 BASE_TO_ROBOT = "base_to_robot"
 ROBOT_TO_BASE = "robot_to_base"
@@ -201,12 +206,17 @@ class PhysicalTransport:
                 "base": parse_link_status(self.base.get_link_status().payload),
                 "robot": parse_link_status(self.robot.get_link_status().payload),
             }
+            self.diagnostics_start = {
+                "base": parse_diagnostics(self.base.get_diagnostics().payload),
+                "robot": parse_diagnostics(self.robot.get_diagnostics().payload),
+            }
         except Exception:
             self.close()
             raise
         self.started = time.monotonic()
         self.estimated_airtime_s = 0.0
         self.transaction_times_ms: list[float] = []
+        self.application_frames_decoded = 0
 
     def now(self) -> float:
         return time.monotonic() - self.started
@@ -235,7 +245,9 @@ class PhysicalTransport:
                 elapsed_ms = (time.monotonic() - started) * 1000
                 self.transaction_times_ms.append(elapsed_ms)
                 self.estimated_airtime_s += lora_airtime_s(len(wire))
-                return decode(payload), {"rssi": rssi, "snr": snr}
+                decoded = decode(payload)
+                self.application_frames_decoded += 1
+                return decoded, {"rssi": rssi, "snr": snr}
             time.sleep(0.001)
         raise TimeoutError(
             f"peer RADIO_RX timeout type={frame.typ:#x} id={frame.message_id}"
@@ -245,6 +257,10 @@ class PhysicalTransport:
         status_end = {
             "base": parse_link_status(self.base.get_link_status().payload),
             "robot": parse_link_status(self.robot.get_link_status().payload),
+        }
+        diagnostics_end = {
+            "base": parse_diagnostics(self.base.get_diagnostics().payload),
+            "robot": parse_diagnostics(self.robot.get_diagnostics().payload),
         }
         return {
             "device_info": self.device_info,
@@ -258,6 +274,17 @@ class PhysicalTransport:
                 key: _status_delta(self.status_start[key], status_end[key])
                 for key in status_end
             },
+            "diagnostics_delta": {
+                key: _diagnostics_delta(
+                    self.diagnostics_start[key], diagnostics_end[key]
+                )
+                for key in diagnostics_end
+            },
+            "host_counters": {
+                "base": self.base.counters.copy(),
+                "robot": self.robot.counters.copy(),
+            },
+            "application_frames_decoded": self.application_frames_decoded,
         }
 
     def close(self) -> None:
@@ -302,6 +329,27 @@ def _status_delta(before: tuple, after: tuple) -> dict:
     }
 
 
+def _diagnostics_delta(before: tuple, after: tuple) -> dict:
+    counter_names = (
+        "usb_frames",
+        "usb_accepted",
+        "send_accepted",
+        "radio_tx_started",
+        "radio_tx_completed",
+        "radio_rx_received",
+        "rx_event_queued",
+        "rx_event_written",
+        "usb_event_dropped",
+    )
+    result = {
+        name: (after[index] - before[index]) % (2**32)
+        for index, name in enumerate(counter_names)
+    }
+    result["usb_queue_depth_start"] = before[9]
+    result["usb_queue_depth_end"] = after[9]
+    return result
+
+
 def _empty_traffic() -> dict:
     return {"offered": 0, "sent": 0, "delivered": 0, "dropped": 0, "bytes": 0}
 
@@ -315,12 +363,14 @@ class MixedRunner:
         status_interval_s: float,
         stop_interval_s: float,
         seed: int,
+        rtcm_hz: float = 1.0,
     ) -> None:
         self.transport = transport
         self.profile = profile
         self.duration_s = duration_s
         self.status_interval_s = status_interval_s
         self.stop_interval_s = stop_interval_s
+        self.rtcm_hz = rtcm_hz if profile == "nominal" else 0.1
         rng = random.Random(seed)
         self.base_session = rng.randrange(1, 2**32)
         self.robot_session = rng.randrange(1, 2**32)
@@ -412,6 +462,7 @@ class MixedRunner:
 
     def _schedule_due(self, now: float) -> None:
         if self.profile == "nominal":
+            epoch_period_s = 1.0 / self.rtcm_hz
             while self.next_epoch < self.duration_s and now >= self.next_epoch:
                 self.epoch += 1
                 self.observation_epochs_offered += 1
@@ -422,7 +473,7 @@ class MixedRunner:
                         rtcm_type(raw) in RTCM_OBSERVATION_SIZES,
                         self.next_epoch,
                     )
-                self.next_epoch += 1.0
+                self.next_epoch += epoch_period_s
             telemetry_period = 0.5
         else:
             while self.next_epoch < self.duration_s and now >= self.next_epoch:
@@ -632,6 +683,7 @@ class MixedRunner:
         return {
             "mode": self.transport.mode,
             "profile": self.profile,
+            "rtcm_hz": self.rtcm_hz,
             "duration_s": self.duration_s,
             "pass": passed,
             "traffic": self.traffic,
@@ -760,6 +812,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--status-interval", type=float, default=60)
     parser.add_argument("--stop-interval", type=float)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument(
+        "--rtcm-hz",
+        type=float,
+        default=1.0,
+        help="nominal-profile synthetic RTCM epoch rate (default: 1.0 Hz)",
+    )
     parser.add_argument("--fault-test", action="store_true")
     parser.add_argument("--report", type=Path)
     parser.add_argument("--base-port")
@@ -772,6 +830,10 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.duration_s <= 0:
         parser.error("duration must be positive")
+    if not math.isfinite(args.rtcm_hz) or args.rtcm_hz <= 0:
+        parser.error("RTCM rate must be finite and positive")
+    if args.profile != "nominal" and args.rtcm_hz != 1.0:
+        parser.error("--rtcm-hz applies only to the nominal profile")
     if args.fault_test:
         report = run_fault_test()
     else:
@@ -798,6 +860,7 @@ def main(argv=None) -> int:
                 args.status_interval,
                 stop_interval,
                 args.seed,
+                args.rtcm_hz,
             )
             report = runner.run()
         finally:

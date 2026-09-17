@@ -15,21 +15,45 @@ application policy
   -> ESP32/SX1262 radio link
 ```
 
-## Next Raspberry Pi work
+## Implemented software boundary
 
-1. Add a Linux/Python service that owns one modem by a stable
-   `/dev/serial/by-id/...` path and publishes machine-readable link health.
-2. On the base Pi, accept RTCM3 from the correction source, validate CRC24Q,
-   enforce freshness, fragment it, and schedule it with STOP/command priority.
-3. On the robot Pi, reassemble and validate RTCM3 before handing bytes to the
-   existing GNSS correction ingress. Keep receiver brands outside this repo.
-4. Map authenticated, allowlisted high-level requests onto Mowgli's existing
-   control interface. Never emit motor PWM, blade PWM, or direct velocity.
-5. Build telemetry from existing typed state rather than scraping logs.
-6. Add reviewed authentication, replay protection, key provisioning, and
-   rotation before accepting real remote commands.
-7. Complete EU868 channel access, airtime, interference, and range review
-   before continuous outdoor operation.
+The repository now includes:
+
+1. A common base/robot Linux service using a stable
+   `/dev/serial/by-id/...` modem path, reconnect/session recovery, bounded
+   queues, stage counters, Prometheus metrics, and JSON health.
+2. Generic base ingress from stdin, TCP, or serial with incremental RTCM3
+   framing, CRC24Q validation, freshness, and strict single-outstanding USB
+   scheduling.
+3. Robot-side RTCM3 reassembly and validation with a bounded localhost TCP
+   output, plus an optional ROS 2 bridge to the verified Universal GNSS
+   ingress.
+4. RTCM recording, machine-readable inspection, timed/accelerated replay, and
+   deterministic-loss replay without fabricating a real capture.
+5. Example configs and systemd units for base, robot, and the optional Mowgli
+   RTCM adapter.
+
+These paths are software-tested. They have not yet completed Raspberry Pi HIL
+or a real GNSS correction capture.
+
+## Remaining gated work
+
+1. Verify both Pi services against the real USB devices: disconnect/reconnect,
+   ESP restart without USB removal, idle-source recovery, and byte-exact real
+   RTCM comparison.
+2. Measure the maximum stable, legally usable physical rate. The current
+   synthetic 1 Hz nominal profile is above effective transaction capacity and
+   is not an approved continuous RF operating point.
+3. Feed a real base capture through record/replay and prove Universal GNSS
+   forwarding plus receiver correction use on the robot.
+4. Add real telemetry from the verified typed Mowgli topics. Emergency, blade,
+   and localization state require a versioned telemetry extension; undefined
+   status bits must not be reused.
+5. Implement the reviewed OSCORE authentication/replay design before mapping
+   any radio request to Mowgli behavior. Then allowlist high-level semantics
+   only; never emit motor PWM, blade PWM, `/cmd_vel`, or bypass local safety.
+6. Complete occupied-bandwidth/ERP/emission measurements and the selected
+   EU868/RED path before continuous outdoor operation.
 
 Local robot safety remains authoritative if LoRa, either ESP32, USB, either Pi,
 RTK corrections, or the base station disappears.

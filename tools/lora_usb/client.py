@@ -3,7 +3,20 @@
 import random
 import time
 
-from .protocol import *
+from .protocol import (
+    DIAGNOSTICS,
+    ERROR,
+    GET_DIAGNOSTICS,
+    GET_LINK_STATUS,
+    HELLO,
+    INFO,
+    LINK_STATUS,
+    RADIO_RX,
+    RADIO_SEND,
+    RADIO_TX_RESULT,
+    StreamDecoder,
+    encode_frame,
+)
 
 
 class ModemError(RuntimeError):
@@ -24,7 +37,14 @@ class ModemClient:
         self.session_events = []
         self.info = None
         self.last_completed = None
-        self.counters = {"bad": 0, "stale": 0, "wrong_session": 0}
+        self.counters = {
+            "usb_bytes_read": 0,
+            "frames_decoded": 0,
+            "wrong_session": 0,
+            "radio_rx_events": 0,
+            "radio_rx_events_matched": 0,
+            "responses": 0,
+        }
         self.serial.write(b"\0")
 
     def _next(self):
@@ -34,11 +54,18 @@ class ModemClient:
         return self.sequence
 
     def poll(self):
-        for frame in self.decoder.feed(self.serial.read(512)):
+        data = self.serial.read(512)
+        self.counters["usb_bytes_read"] += len(data)
+        for frame in self.decoder.feed(data):
+            self.counters["frames_decoded"] += 1
             if frame.session != self.session:
                 self.counters["wrong_session"] += 1
             else:
                 self.inbox.append(frame)
+                if frame.msg_type == RADIO_RX:
+                    self.counters["radio_rx_events"] += 1
+                else:
+                    self.counters["responses"] += 1
         return list(self.inbox)
 
     def _wait_response(self, msg_type, seq, deadline):
@@ -77,6 +104,9 @@ class ModemClient:
         self.poll()
         for index, frame in enumerate(self.inbox):
             if frame.msg_type == RADIO_RX and predicate(frame):
+                self.counters["radio_rx_events_matched"] = (
+                    self.counters.get("radio_rx_events_matched", 0) + 1
+                )
                 return self.inbox.pop(index)
         return None
 
@@ -84,6 +114,11 @@ class ModemClient:
         seq = self._next()
         self.serial.write(encode_frame(GET_LINK_STATUS, self.session, seq))
         return self._wait_response(LINK_STATUS, seq, time.monotonic() + deadline)
+
+    def get_diagnostics(self, deadline=2.0):
+        seq = self._next()
+        self.serial.write(encode_frame(GET_DIAGNOSTICS, self.session, seq))
+        return self._wait_response(DIAGNOSTICS, seq, time.monotonic() + deadline)
 
     def close(self):
         self.serial.close()

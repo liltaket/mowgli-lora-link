@@ -1,0 +1,27 @@
+[Unit]
+Description=Mowgli LoRa base RTCM bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mowgli
+Group=mowgli
+SupplementaryGroups=dialout
+ExecStart=/opt/mowgli-lora-link/.venv/bin/mowgli-lora-base --config /etc/mowgli-lora/base.yaml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

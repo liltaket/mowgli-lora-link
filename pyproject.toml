@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mowgli-lora-link"
+version = "0.2.0"
+description = "Linux host services and tools for the Mowgli USB-LoRa link"
+requires-python = ">=3.10"
+dependencies = ["pyserial>=3.5", "PyYAML>=6.0"]
+
+[project.scripts]
+mowgli-lora-base = "host.mowgli_lora.service:main_base"
+mowgli-lora-robot = "host.mowgli_lora.service:main_robot"
+mowgli-lora-service-bench = "host.mowgli_lora.service_bench:main"
+mowgli-lora-rtcm-inspect = "host.mowgli_lora.rtcm_tool:main_inspect"
+mowgli-lora-rtcm-compare = "host.mowgli_lora.rtcm_tool:main_compare"
+mowgli-lora-rtcm-record = "host.mowgli_lora.rtcm_tool:main_record"
+mowgli-lora-rtcm-replay = "host.mowgli_lora.rtcm_tool:main_replay"
+mowgli-lora-mowgli-rtcm = "host.mowgli_lora.mowgli_ros:main"
+
+[tool.setuptools]
+packages = ["host", "host.mowgli_lora", "tools", "tools.lora_usb"]

@@ -9,8 +9,8 @@ constexpr uint8_t SF = 5, CR = 5, V = 1;
 constexpr int8_t POWER = 2;
 constexpr uint32_t TX_WATCHDOG_MS = 2000;
 constexpr size_t UH = 16, UM = 256, UD = 274, UE = 278, AM = 200, AD = 218, QD = 6;
-constexpr uint8_t HELLO = 1, SEND = 2, GET_STATUS = 3, INFO = 0x81, TXOK = 0x82, STAT = 0x83,
-                  RX_EVENT = 0x90, ERR = 0xff;
+constexpr uint8_t HELLO = 1, SEND = 2, GET_STATUS = 3, GET_DIAGNOSTICS = 4, INFO = 0x81,
+                  TXOK = 0x82, STAT = 0x83, DIAGNOSTICS = 0x84, RX_EVENT = 0x90, ERR = 0xff;
 constexpr uint16_t E_UNSUPPORTED = 1, E_BAD = 2, E_NOTREADY = 3, E_WRONG = 4, E_BUSY = 5,
                    E_STALE = 6, E_REUSED = 7, E_RADIO = 8;
 SX1262 radio = new Module(NSS_PIN, DIO1_PIN, RST_PIN, BUSY_PIN);
@@ -26,6 +26,10 @@ bool ready = false;
 struct C
 {
   uint32_t tx = 0, rx = 0, rxBad = 0, usbBad = 0, radio = 0, drops = 0;
+  // End-to-end diagnostic counters.  They deliberately count stages rather
+  // than inferred outcomes, so a host can identify where an RX event stopped.
+  uint32_t usbFrames = 0, usbAccepted = 0, sendAccepted = 0, txStarted = 0;
+  uint32_t rxEventQueued = 0, rxEventWritten = 0;
 } c;
 struct F
 {
@@ -179,6 +183,8 @@ bool putQ(const uint8_t* b, size_t n, bool event)
   q[qt].event = event;
   qt = (qt + 1) % QD;
   qn++;
+  if (event)
+    ++c.rxEventQueued;
   return true;
 }
 size_t frame(uint8_t type, uint32_t ses, uint32_t seq, const uint8_t* p, size_t pn, uint8_t* out)
@@ -204,8 +210,18 @@ void flush()
   size_t n = enc(q[qh].b, q[qh].n, e);
   if (Serial.availableForWrite() < int(n + 1))
     return;
-  Serial.write(e, n);
-  Serial.write(uint8_t(0));
+  e[n] = 0;
+  const bool wasEvent = q[qh].event;
+  const size_t written = Serial.write(e, n + 1);
+  if (written == n + 1 && wasEvent)
+    ++c.rxEventWritten;
+  else if (written != n + 1)
+  {
+    if (wasEvent)
+      ++c.drops;
+    else
+      ++c.usbBad;
+  }
   qh = (qh + 1) % QD;
   qn--;
 }
@@ -379,6 +395,23 @@ void status(uint32_t seq)
   w32(p + 32, c.drops);
   reply(STAT, seq, p, 36);
 }
+void diagnostics(uint32_t seq)
+{
+  // Versioned by message type.  Keep LINK_STATUS at its published 36-byte
+  // shape so existing hosts remain compatible.
+  uint8_t p[40] = {};
+  w32(p, c.usbFrames);
+  w32(p + 4, c.usbAccepted);
+  w32(p + 8, c.sendAccepted);
+  w32(p + 12, c.txStarted);
+  w32(p + 16, c.tx);
+  w32(p + 20, c.rx);
+  w32(p + 24, c.rxEventQueued);
+  w32(p + 28, c.rxEventWritten);
+  w32(p + 32, c.drops);
+  w32(p + 36, qn);
+  reply(DIAGNOSTICS, seq, p, sizeof(p));
+}
 void sendAir(const uint8_t* p, size_t pn, uint32_t seq)
 {
   if (!ready)
@@ -424,6 +457,7 @@ void sendAir(const uint8_t* p, size_t pn, uint32_t seq)
     listen();
     return;
   }
+  ++c.txStarted;
 }
 void handle(const uint8_t* b, size_t n)
 {
@@ -442,6 +476,7 @@ void handle(const uint8_t* b, size_t n)
     c.usbBad++;
     return;
   }
+  ++c.usbFrames;
   if (t == HELLO)
   {
     if (pn)
@@ -473,6 +508,7 @@ void handle(const uint8_t* b, size_t n)
     }
     saveReq(b, n);
     lastSeq = seq;
+    ++c.usbAccepted;
     info(seq);
     return;
   }
@@ -512,14 +548,31 @@ void handle(const uint8_t* b, size_t n)
     if (!pn || pn > AM)
       error(seq, E_BAD, 0, t);
     else
+    {
+      ++c.usbAccepted;
+      ++c.sendAccepted;
       sendAir(p, pn, seq);
+    }
   }
   else if (t == GET_STATUS)
   {
     if (pn)
       error(seq, E_BAD, 0, t);
     else
+    {
+      ++c.usbAccepted;
       status(seq);
+    }
+  }
+  else if (t == GET_DIAGNOSTICS)
+  {
+    if (pn)
+      error(seq, E_BAD, 0, t);
+    else
+    {
+      ++c.usbAccepted;
+      diagnostics(seq);
+    }
   }
   else
     error(seq, E_UNSUPPORTED, 0, t);

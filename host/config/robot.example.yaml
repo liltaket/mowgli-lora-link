@@ -1,0 +1,16 @@
+role: robot
+modem:
+  # Find this with: ls -l /dev/serial/by-id/
+  device: /dev/serial/by-id/usb-Espressif_XIAO_ESP32S3_ROBOT-if00
+  baudrate: 115200
+  reconnect_seconds: 1
+rtcm:
+  output:
+    type: tcp
+    bind: 127.0.0.1
+    port: 2233
+metrics:
+  bind: 127.0.0.1
+  port: 9609
+logging:
+  level: INFO
