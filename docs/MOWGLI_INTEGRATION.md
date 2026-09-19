@@ -32,6 +32,29 @@ then reads that validated localhost stream and publishes `RtcmFrame` with
 reliable keep-last-50 QoS. It imports ROS dependencies lazily, so the base and
 non-ROS verification tools do not require a ROS installation.
 
+## Deployment boundary and correction-source ownership
+
+The supplied `mowgli-lora-mowgli-rtcm.service` is a host ROS adapter. Use it
+only where that host has the matching ROS distribution, Mowgli overlay, and
+`universal_gnss_ros2` typesupport installed, plus compatible DDS discovery and
+network configuration. The unit does not provide those host dependencies or
+configuration merely because ROS/GNSS is running in a container.
+
+For a containerized GPS deployment, implement the integration at the GPS
+container boundary. That boundary must select exactly one correction source:
+
+| Selection | Meaning |
+| --- | --- |
+| `ntrip` | The existing network/NTRIP correction path owns receiver input. |
+| `tcp` | The validated LoRa localhost TCP stream is intentionally routed into the GPS container. |
+| `none` | No external correction source is routed to the receiver. |
+
+There is no automatic failover in this contract. Do not configure simultaneous
+NTRIP and LoRa publishers, and do not put source arbitration into the LoRa host
+service. A source transition is a separately reviewed deployment change: stop
+the old publisher, apply one explicit selector value, and prove the selected
+path at the receiver boundary.
+
 ## Typed telemetry sources
 
 The eventual robot telemetry adapter should subscribe to typed state rather
@@ -94,3 +117,5 @@ dependency.
 Publishing a valid `RtcmFrame` proves only the software ingress. Final HIL
 must also show Universal GNSS forwarding diagnostics, bytes reaching the
 configured receiver transport, and the receiver actually using corrections.
+It does not prove correction-source exclusivity, receiver fix quality, RF
+compliance, mower navigation, or any safety/control behavior.

@@ -45,6 +45,14 @@ use unstable `/dev/ttyACM0` names. The service reconnects USB automatically;
 an ESP boot-ID change clears pending host state and starts a new session.
 The example units add the service user to the normal `dialout` device group.
 
+For the first robot installation, follow the two-stage procedure in
+[`docs/ROBOT_HIL.md`](../docs/ROBOT_HIL.md). Stage 1 enables only
+`mowgli-lora-robot`, with its localhost TCP output (`127.0.0.1:2233`) and
+health endpoint (`127.0.0.1:9609`). It deliberately does **not** install or
+start the ROS adapter, so the existing Wi-Fi/NTRIP path remains the sole
+correction publisher. Do not flash the ESP32-S3, alter radio configuration,
+or perform any mower actuation as part of this installation.
+
 The base ingress supports `stdin`, client `tcp`, and `serial`. The robot output
 is a localhost TCP server, default port 2233. A basic non-ROS end-to-end check
 looks like:
@@ -89,9 +97,14 @@ unavailable.
 the same complete frames in byte-exact order, and reports missing/unexpected
 frame counts plus the delivery ratio as JSON.
 
-On the robot, first verify the TCP stream independently. When the current
-Mowgli ROS 2 environment and `universal_gnss_ros2` are available, publish the
-same validated stream to the receiver ingress with:
+On the robot, first verify the TCP stream independently. The optional host ROS
+adapter is for hosts which have a matching ROS installation **and** the
+`universal_gnss_ros2` environment locally available, together with compatible
+DDS discovery and network configuration. A containerized deployment does not
+provide those host dependencies automatically; prefer an explicit
+container-boundary integration and correction-source selection. When the
+matching host environment is available, publish the same validated stream to
+the receiver ingress with:
 
 ```bash
 source /opt/ros/$ROS_DISTRO/setup.bash
@@ -105,15 +118,22 @@ The bridge uses reliable keep-last-50 QoS and preserves each complete RTCM3
 frame byte-for-byte. Public `/rtcm` is an observation mirror, not the receiver
 ingress. See [`docs/MOWGLI_INTEGRATION.md`](../docs/MOWGLI_INTEGRATION.md).
 
-For normal robot boot, install `host/systemd/mowgli-lora-mowgli-rtcm.service`
-and copy `host/config/mowgli-ros.example.env` to
-`/etc/mowgli-lora/mowgli-ros.env`, adjusting the two setup paths. Then enable
-both units once:
+Only after a separately reviewed integration decision, install
+`host/systemd/mowgli-lora-mowgli-rtcm.service` and copy
+`host/config/mowgli-ros.example.env` to `/etc/mowgli-lora/mowgli-ros.env`,
+adjusting the two setup paths. This is Stage 2, not part of the initial robot
+transport check. Enable both units only on a host-based ROS/GNSS deployment:
 
 ```bash
 sudo systemctl enable --now \
   mowgli-lora-robot mowgli-lora-mowgli-rtcm
 ```
+
+For containerized ROS/GNSS, choose exactly one correction source at the GPS
+container boundary: `ntrip`, `tcp`, or `none`. Do not add automatic failover
+and do not run simultaneous correction publishers. The selector belongs to the
+GPS container integration, not to this LoRa host service; see
+[`docs/MOWGLI_INTEGRATION.md`](../docs/MOWGLI_INTEGRATION.md).
 
 Metrics are local HTTP endpoints: `/metrics` is Prometheus text and `/healthz`
 is JSON. The base default is `127.0.0.1:9608`, robot `127.0.0.1:9609`.
