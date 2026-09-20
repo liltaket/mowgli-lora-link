@@ -102,6 +102,31 @@ by 20 during the capture, so this is boot/USB/reception recovery evidence, not
 a clean-link, range, or production-readiness claim. No robot-side RF
 transmission, motor command, blade command, or safety-path change was made.
 
+## Installed robot correction forwarding
+
+Later on 2026-09-20, the robot host service from commit `d2af5df` was installed
+with the modem selected by its stable USB by-id path. Both its RTCM output and
+health endpoint remained loopback-only. An independent eight-second TCP
+capture on port 2233 contained 100 complete RTCM3 frames and 13,613 bytes,
+covering all 14 live source message types listed above with zero CRC failures.
+
+The GPS sidecar's existing NTRIP process was then disabled before the LoRa TCP
+adapter was started. ROS 2 discovery showed exactly one publisher on
+`/_gps_internal/universal/rtcm`: `mowgli_lora_rtcm_bridge`. During a 12-second
+capture it published 108 validated frames (15,581 bytes), of which the Mowgli
+topic bridge exposed 107 on the public `/rtcm` observation topic. The GNSS
+status reported a valid fix, differential corrections active, RTK mode 3,
+19 satellites used, a 1.9-second correction age, and a valid MSM summary.
+
+This proves the selected LoRa path reached the Universal GNSS correction
+ingress and the live receiver reported using differential corrections. It does
+not prove centimetre accuracy, continuous RF reliability, or regulatory
+suitability. Six fragment reassembly timeouts occurred during a separate
+ten-second transport delta, while complete frames continued to flow and the
+USB event-drop counter did not increase. The temporary ROS adapter container
+is a deployment bridge pending a native, mutually exclusive `ntrip|tcp|none`
+source selector in the GPS sidecar.
+
 ## Physical tests
 
 Both table-top endpoints ran the same current firmware with a 12-symbol
