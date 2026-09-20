@@ -6,7 +6,7 @@ constexpr uint8_t SCK_PIN = 7, MISO_PIN = 8, MOSI_PIN = 9, NSS_PIN = 41, DIO1_PI
                   RST_PIN = 42, BUSY_PIN = 40;
 constexpr float FREQ = 868.3F, BW = 500.0F;
 constexpr uint8_t SF = 5, CR = 5, V = 1;
-constexpr int8_t POWER = 10;
+constexpr int8_t POWER = 17;
 constexpr uint32_t TX_WATCHDOG_MS = 2000;
 constexpr size_t UH = 16, UM = 256, UD = 274, UE = 278, AM = 200, AD = 218, QD = 6;
 constexpr uint8_t HELLO = 1, SEND = 2, GET_STATUS = 3, GET_DIAGNOSTICS = 4, INFO = 0x81,

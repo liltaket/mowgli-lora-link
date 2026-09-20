@@ -41,7 +41,7 @@ limited link.
 | Bandwidth | 500 kHz |
 | Spreading factor | 5 |
 | Coding rate | 4/5 |
-| Output power | +10 dBm |
+| Output power | +17 dBm |
 | Preamble | 12 symbols |
 | Sync word | RadioLib private LoRa sync word |
 | PHY CRC | enabled |
