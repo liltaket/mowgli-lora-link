@@ -6,7 +6,13 @@ constexpr uint8_t SCK_PIN = 7, MISO_PIN = 8, MOSI_PIN = 9, NSS_PIN = 41, DIO1_PI
                   RST_PIN = 42, BUSY_PIN = 40;
 constexpr float FREQ = 868.3F, BW = 500.0F;
 constexpr uint8_t SF = 5, CR = 5, V = 1;
-constexpr int8_t POWER = 10;
+#ifndef MOWGLI_LORA_TX_POWER_DBM
+#define MOWGLI_LORA_TX_POWER_DBM 10
+#endif
+
+constexpr int8_t POWER = MOWGLI_LORA_TX_POWER_DBM;
+static_assert(POWER >= -9 && POWER <= 22,
+              "MOWGLI_LORA_TX_POWER_DBM must be within the SX1262 -9 to +22 dBm range");
 constexpr uint32_t TX_WATCHDOG_MS = 2000;
 constexpr size_t UH = 16, UM = 256, UD = 274, UE = 278, AM = 200, AD = 218, QD = 6;
 constexpr uint8_t HELLO = 1, SEND = 2, GET_STATUS = 3, GET_DIAGNOSTICS = 4, INFO = 0x81,

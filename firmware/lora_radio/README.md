@@ -24,12 +24,24 @@ CRC, and +10 dBm.
 It is prototype-only and regulatory-unverified; it is not a range, EU868,
 coexistence, duty-cycle, or production-link claim.
 
+`modem_lab_17dbm` is a separately named lab build which sets the SX1262
+conducted-power configuration to +17 dBm at compile time. It leaves the
+normal `modem` profile at +10 dBm. Building that profile is not permission to
+transmit: the operator remains responsible for licence conditions, frequency,
+ERP (including antenna gain), duty cycle, and all applicable rules.
+
 ## Build and supervised flash
 
 Build as the normal user:
 
 ```bash
 uvx --with intelhex platformio run -e modem
+```
+
+Build the explicitly lab-only +17 dBm variant without flashing:
+
+```bash
+uvx --with intelhex platformio run -e modem_lab_17dbm
 ```
 
 Only intentionally supervised table tests should flash the two boards, using
