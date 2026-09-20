@@ -57,6 +57,36 @@ mock host under `tools/lora_usb/` for the bounded physical test. A failed
 firmware protocol self-test leaves the radio unavailable; `INFO` then reports
 `radio_ready=0` and link-status counters expose the failure.
 
+Keep the explicit `board_build.flash_mode = dio` setting. On the tested target,
+rewriting offset `0x0` with a QIO image header left the board in a
+`TG0WDT_SYS_RST` loop before USB modem code ran. If an installed board shows
+that exact boot log, reflash only the generated bootloader at `0x0` with
+esptool's `--flash-mode dio`, then flash the application at `0x10000`. An
+app-only flash at `0x10000` cannot repair a bootloader header already stored at
+`0x0`. Verify the bootloader input hash and the esptool write verification; do
+not erase flash or rewrite partitions as part of this recovery.
+
 The first two-board mock result is recorded in
 [`PHASE2_BENCH.md`](../../docs/lora/PHASE2_BENCH.md), including the observed
 host-side prototype caveat and the boundaries that remain unproven.
+
+## Radio startup recovery
+
+The USB protocol starts before SX1262 initialisation. Radio startup runs in a
+separate bounded FreeRTOS task: it pulses reset, waits at most 150 ms for BUSY
+to go low, and performs at most three attempts with a 75 ms RadioLib BUSY/SPI
+timeout and 250 ms backoff. This keeps `HELLO`, `INFO`, and status requests
+responsive if the radio is absent or wedged. `radio_ready` becomes `1` only
+after configuration and the first receive transition succeed; otherwise it
+stays `0`, `radio_errors` increases, and `RADIO_SEND` returns `E_NOTREADY`.
+The recovery path does not send any air traffic autonomously.
+
+For a wedged installed board that cannot be power-cycled, build the USB-only
+recovery image with `uvx --with intelhex platformio run -e
+modem_usb_recovery`. It intentionally skips all SX1262 pin and SPI activity,
+keeps `radio_ready=0`, and rejects `RADIO_SEND`; use it only to regain USB
+diagnostics before flashing a repaired normal image. First establish whether
+the application is running: a ROM log ending after its first `load:` line and
+repeating `TG0WDT_SYS_RST` is a bootloader/flash-mode failure, not an SX1262
+failure. A responsive USB-only image rules the boot path in and isolates later
+radio recovery tests from RF activity.

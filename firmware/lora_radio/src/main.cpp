@@ -14,12 +14,24 @@ constexpr int8_t POWER = MOWGLI_LORA_TX_POWER_DBM;
 static_assert(POWER >= -9 && POWER <= 22,
               "MOWGLI_LORA_TX_POWER_DBM must be within the SX1262 -9 to +22 dBm range");
 constexpr uint32_t TX_WATCHDOG_MS = 2000;
+// Keep a wedged SX1262 from holding the USB modem's Arduino loop hostage.
+constexpr uint32_t RADIO_BUSY_PRECHECK_MS = 150;
+constexpr uint32_t RADIO_SPI_TIMEOUT_MS = 75;
+constexpr uint32_t RADIO_RESET_PULSE_MS = 10;
+constexpr uint32_t RADIO_RETRY_BACKOFF_MS = 250;
+constexpr uint8_t RADIO_INIT_ATTEMPTS = 3;
+static_assert(RADIO_INIT_ATTEMPTS > 0, "radio initialisation needs at least one attempt");
+static_assert(RADIO_SPI_TIMEOUT_MS > 0 && RADIO_SPI_TIMEOUT_MS <= RADIO_BUSY_PRECHECK_MS,
+              "SPI timeout must be a finite boot-time bound");
 constexpr size_t UH = 16, UM = 256, UD = 274, UE = 278, AM = 200, AD = 218, QD = 6;
 constexpr uint8_t HELLO = 1, SEND = 2, GET_STATUS = 3, GET_DIAGNOSTICS = 4, INFO = 0x81,
                   TXOK = 0x82, STAT = 0x83, DIAGNOSTICS = 0x84, RX_EVENT = 0x90, ERR = 0xff;
 constexpr uint16_t E_UNSUPPORTED = 1, E_BAD = 2, E_NOTREADY = 3, E_WRONG = 4, E_BUSY = 5,
                    E_STALE = 6, E_REUSED = 7, E_RADIO = 8;
-SX1262 radio = new Module(NSS_PIN, DIO1_PIN, RST_PIN, BUSY_PIN);
+// Keep the Module visible so its per-transfer BUSY timeout can be bounded
+// before RadioLib probes the SX1262.
+Module radioModule(NSS_PIN, DIO1_PIN, RST_PIN, BUSY_PIN);
+SX1262 radio(&radioModule);
 enum RS : uint8_t
 {
   DOWN = 0,
@@ -27,8 +39,15 @@ enum RS : uint8_t
   TRANSMITTING = 2
 };
 volatile bool irq = false;
-RS rs = DOWN;
-bool ready = false;
+volatile RS rs = DOWN;
+// Published only after configuration and the first receive transition succeed.
+volatile bool ready = false;
+struct RadioInitResult
+{
+  bool ready;
+  uint32_t errors;
+};
+QueueHandle_t radioInitResults = nullptr;
 struct C
 {
   uint32_t tx = 0, rx = 0, rxBad = 0, usbBad = 0, radio = 0, drops = 0;
@@ -59,6 +78,87 @@ size_t lastReqN = 0, lastRespN = 0;
 void isr()
 {
   irq = true;
+}
+bool waitForBusyLow(uint32_t timeoutMs)
+{
+  const uint32_t started = millis();
+  while (digitalRead(BUSY_PIN) != LOW)
+  {
+    if (millis() - started >= timeoutMs)
+      return false;
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+  return true;
+}
+void resetRadioHardware()
+{
+  pinMode(NSS_PIN, OUTPUT);
+  digitalWrite(NSS_PIN, HIGH);
+  pinMode(RST_PIN, OUTPUT);
+  digitalWrite(RST_PIN, LOW);
+  vTaskDelay(pdMS_TO_TICKS(RADIO_RESET_PULSE_MS));
+  digitalWrite(RST_PIN, HIGH);
+  pinMode(BUSY_PIN, INPUT);
+}
+bool startReceiveAfterInit()
+{
+  irq = false;
+  const int st = radio.startReceive();
+  return st == RADIOLIB_ERR_NONE;
+}
+void radioInitTask(void*)
+{
+  RadioInitResult result{false, 0};
+  for (uint8_t attempt = 0; attempt < RADIO_INIT_ATTEMPTS; ++attempt)
+  {
+    resetRadioHardware();
+    if (!waitForBusyLow(RADIO_BUSY_PRECHECK_MS))
+    {
+      ++result.errors;
+    }
+    else
+    {
+      // RadioLib uses this value for every BUSY wait during begin().
+      radioModule.spiConfig.timeout = RADIO_SPI_TIMEOUT_MS;
+      const int st = radio.begin(FREQ, BW, SF, CR, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, POWER, 12,
+                                 1.8, false);
+      if (st == RADIOLIB_ERR_NONE && radio.setCRC(true) == RADIOLIB_ERR_NONE &&
+          radio.setDio2AsRfSwitch(true) == RADIOLIB_ERR_NONE)
+      {
+        radio.setDio1Action(isr);
+        if (startReceiveAfterInit())
+        {
+          result.ready = true;
+          xQueueSend(radioInitResults, &result, 0);
+          vTaskDelete(nullptr);
+          return;
+        }
+        ++result.errors;
+      }
+      else
+      {
+        ++result.errors;
+      }
+    }
+    if (attempt + 1 < RADIO_INIT_ATTEMPTS)
+      vTaskDelay(pdMS_TO_TICKS(RADIO_RETRY_BACKOFF_MS));
+  }
+  // USB remains available and no recovery path transmits autonomously.
+  xQueueSend(radioInitResults, &result, 0);
+  vTaskDelete(nullptr);
+}
+void publishRadioInitResult()
+{
+  if (!radioInitResults)
+    return;
+  RadioInitResult result{};
+  if (xQueueReceive(radioInitResults, &result, 0) != pdPASS)
+    return;
+  c.radio += result.errors;
+  ready = result.ready;
+  rs = result.ready ? RECV : DOWN;
+  vQueueDelete(radioInitResults);
+  radioInitResults = nullptr;
 }
 uint16_t crc(const uint8_t* d, size_t n)
 {
@@ -629,28 +729,39 @@ void setup()
   airNext = esp_random();
   if (!airNext)
     airNext = 1;
-  SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN, NSS_PIN);
   protocolSelfTestPassed = protocolSelfTest();
   if (!protocolSelfTestPassed)
   {
     ++c.radio;
     return;
   }
-  // 12-symbol preamble is the shared Phase 3 bench profile at SF5.
-  int st = radio.begin(FREQ, BW, SF, CR, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, POWER, 12, 1.8, false);
-  if (st == RADIOLIB_ERR_NONE && radio.setCRC(true) == RADIOLIB_ERR_NONE &&
-      radio.setDio2AsRfSwitch(true) == RADIOLIB_ERR_NONE)
+#if defined(MOWGLI_LORA_USB_RECOVERY)
+  // Deliberately keep the RF side untouched. This image exists only to regain
+  // deterministic USB access when live hardware cannot be power-cycled.
+  ++c.radio;
+  return;
+#endif
+  SPI.begin(SCK_PIN, MISO_PIN, MOSI_PIN, NSS_PIN);
+  // Never call radio.begin() from the USB-facing Arduino loop.  A BUSY-high
+  // radio is retried in a separate bounded task while HELLO/INFO continue.
+  // Arduino's loop task is on core 1 for this ESP32-S3 target; use core 0 so
+  // an uncooperative radio probe cannot consume the USB protocol's core.
+  radioInitResults = xQueueCreate(1, sizeof(RadioInitResult));
+  if (!radioInitResults ||
+      xTaskCreatePinnedToCore(radioInitTask, "radio-init", 4096, nullptr, 0, nullptr, 0) != pdPASS)
   {
-    ready = true;
-    radio.setDio1Action(isr);
-    listen();
-  }
-  else
+    if (radioInitResults)
+    {
+      vQueueDelete(radioInitResults);
+      radioInitResults = nullptr;
+    }
     c.radio++;
+  }
 }
 void loop()
 {
   usbTask();
+  publishRadioInitResult();
   radioTask();
   txWatchdog();
   flush();

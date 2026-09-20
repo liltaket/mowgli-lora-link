@@ -82,6 +82,58 @@ during the bounded run. It does not validate correction contents, rover fix
 quality, outdoor range, interference tolerance, continuous operation, antenna
 ERP, or regulatory compliance.
 
+## Installed robot boot and radio recovery
+
+On 2026-09-20 an installed robot modem stopped before the application after a
+manual full-image flash. Its ROM log repeated `TG0WDT_SYS_RST`, showed
+`mode:QIO`, and stopped after the first bootloader `load:` line. Rewriting only
+the bootloader at `0x0` with esptool `--flash-mode dio` removed the reset loop.
+The USB-only recovery image then completed `HELLO`, `GET_LINK_STATUS`, and
+`GET_DIAGNOSTICS` with `radio_ready=0` and no RF or SPI initialisation.
+
+The final normal recovery image had SHA-256
+`ac6b3a693cbf72b7133730cba69c9f34fab2b5d6dc96bdc76b594b725596bd73`.
+It was flashed app-only at `0x10000`, reported `radio_ready=1`, and passively
+received 199 valid radio events during a 12-second host capture. The modem
+reported zero bad radio packets, zero bad USB frames, and zero USB event drops.
+RSSI ranged from -110 to -103 dBm with a -105.64 dBm mean; SNR ranged from
+-4.25 to +2.25 dB with a -0.26 dB mean. The separate radio-error counter rose
+by 20 during the capture, so this is boot/USB/reception recovery evidence, not
+a clean-link, range, or production-readiness claim. No robot-side RF
+transmission, motor command, blade command, or safety-path change was made.
+
+## Installed robot correction forwarding
+
+Later on 2026-09-20, the robot host service from commit `d2af5df` was installed
+with the modem selected by its stable USB by-id path. Both its RTCM output and
+health endpoint remained loopback-only. An independent eight-second TCP
+capture on port 2233 contained 100 complete RTCM3 frames and 13,613 bytes,
+covering all 14 live source message types listed above with zero CRC failures.
+
+The GPS sidecar's existing NTRIP process was then disabled before the LoRa TCP
+adapter was started. ROS 2 discovery showed exactly one publisher on
+`/_gps_internal/universal/rtcm`: `mowgli_lora_rtcm_bridge`. During a 12-second
+capture it published 108 validated frames (15,581 bytes), of which the Mowgli
+topic bridge exposed 107 on the public `/rtcm` observation topic. The GNSS
+status reported a valid fix, differential corrections active, RTK mode 3,
+19 satellites used, a 1.9-second correction age, and a valid MSM summary.
+
+This proves the selected LoRa path reached the Universal GNSS correction
+ingress and the live receiver reported using differential corrections. It does
+not prove centimetre accuracy, continuous RF reliability, or regulatory
+suitability. Six fragment reassembly timeouts occurred during a separate
+ten-second transport delta, while complete frames continued to flow and the
+USB event-drop counter did not increase. The temporary ROS adapter container
+is a deployment bridge pending a native, mutually exclusive `ntrip|tcp|none`
+source selector in the GPS sidecar.
+
+A later 20-second GNSS-status series kept `corrections_active=true` and RTK
+mode 3 in all 201 samples, but correction age ranged from 1.3 to 27.1 seconds
+with a 3.7-second median. MSM-summary age ranged from 0.013 to 25.093 seconds
+with a 1.472-second median. This confirms intermittent stale intervals despite
+continued correction use; the LoRa path is not yet a reliability-equivalent
+replacement for the previously verified local NTRIP path.
+
 ## Physical tests
 
 Both table-top endpoints ran the same current firmware with a 12-symbol
