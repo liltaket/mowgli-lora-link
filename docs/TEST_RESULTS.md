@@ -82,6 +82,26 @@ during the bounded run. It does not validate correction contents, rover fix
 quality, outdoor range, interference tolerance, continuous operation, antenna
 ERP, or regulatory compliance.
 
+## Installed robot boot and radio recovery
+
+On 2026-09-20 an installed robot modem stopped before the application after a
+manual full-image flash. Its ROM log repeated `TG0WDT_SYS_RST`, showed
+`mode:QIO`, and stopped after the first bootloader `load:` line. Rewriting only
+the bootloader at `0x0` with esptool `--flash-mode dio` removed the reset loop.
+The USB-only recovery image then completed `HELLO`, `GET_LINK_STATUS`, and
+`GET_DIAGNOSTICS` with `radio_ready=0` and no RF or SPI initialisation.
+
+The final normal recovery image had SHA-256
+`ac6b3a693cbf72b7133730cba69c9f34fab2b5d6dc96bdc76b594b725596bd73`.
+It was flashed app-only at `0x10000`, reported `radio_ready=1`, and passively
+received 199 valid radio events during a 12-second host capture. The modem
+reported zero bad radio packets, zero bad USB frames, and zero USB event drops.
+RSSI ranged from -110 to -103 dBm with a -105.64 dBm mean; SNR ranged from
+-4.25 to +2.25 dB with a -0.26 dB mean. The separate radio-error counter rose
+by 20 during the capture, so this is boot/USB/reception recovery evidence, not
+a clean-link, range, or production-readiness claim. No robot-side RF
+transmission, motor command, blade command, or safety-path change was made.
+
 ## Physical tests
 
 Both table-top endpoints ran the same current firmware with a 12-symbol
