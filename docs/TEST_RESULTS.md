@@ -127,6 +127,13 @@ USB event-drop counter did not increase. The temporary ROS adapter container
 is a deployment bridge pending a native, mutually exclusive `ntrip|tcp|none`
 source selector in the GPS sidecar.
 
+A later 20-second GNSS-status series kept `corrections_active=true` and RTK
+mode 3 in all 201 samples, but correction age ranged from 1.3 to 27.1 seconds
+with a 3.7-second median. MSM-summary age ranged from 0.013 to 25.093 seconds
+with a 1.472-second median. This confirms intermittent stale intervals despite
+continued correction use; the LoRa path is not yet a reliability-equivalent
+replacement for the previously verified local NTRIP path.
+
 ## Physical tests
 
 Both table-top endpoints ran the same current firmware with a 12-symbol
