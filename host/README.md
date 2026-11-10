@@ -64,6 +64,13 @@ freshness is measured from actual ingress rather than from when the main loop
 eventually consumes them. A serial read timeout is treated as idle, not as a
 disconnect.
 
+When launched by systemd, `/healthz` additionally reports `invocation_id` from
+the producer's `INVOCATION_ID`, captured once at HTTP server startup. This lets
+a local observer compare the endpoint producer with the service invocation.
+The optional field is absent outside systemd. It proves process identity, not
+fresh corrections or downstream receiver use; the existing readiness checks
+remain unchanged.
+
 For a deliberately bounded bench with two directly attached modems, use the
 same asynchronous services with generated RTCM3 transport fixtures:
 
