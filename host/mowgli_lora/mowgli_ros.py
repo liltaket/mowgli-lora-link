@@ -14,11 +14,11 @@ from tools.lora_usb.application import RTCM_TRANSPORT_TTL_MS
 from .rtcm import RtcmFrame, RtcmStreamParser
 
 LOG = logging.getLogger(__name__)
-DEFAULT_TOPIC = "/_gps_internal/universal/rtcm"
+DEFAULT_TOPIC = "/universal_gnss_receiver/rtcm"
 
 
 def populate_rtcm_message(message, frame: RtcmFrame, stamp):
-    """Populate a universal_gnss_ros2/RtcmFrame-compatible object."""
+    """Populate a universal_gnss_msgs/RtcmFrame-compatible object."""
     message.stamp = stamp
     message.message_type = frame.message_type
     message.data = list(frame.raw)
@@ -138,10 +138,11 @@ def main() -> None:
         import rclpy
         from rclpy.node import Node
         from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
-        from universal_gnss_ros2.msg import RtcmFrame as RosRtcmFrame
+        from universal_gnss_msgs.msg import RtcmFrame as RosRtcmFrame
     except ImportError as exc:  # pragma: no cover - requires ROS installation
         raise SystemExit(
-            "source the Mowgli ROS 2 environment with universal_gnss_ros2 installed"
+            "source the ROS 2 environment containing universal_gnss_msgs; "
+            "the host systemd adapter requires host-installed ROS dependencies"
         ) from exc
 
     rclpy.init(args=ros_args)

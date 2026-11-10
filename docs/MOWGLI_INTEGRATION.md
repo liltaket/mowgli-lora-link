@@ -13,8 +13,8 @@ The robot-side service must publish validated, complete RTCM3 frames to:
 
 | Field | Value |
 | --- | --- |
-| Topic | `/_gps_internal/universal/rtcm` |
-| Type | `universal_gnss_ros2/msg/RtcmFrame` |
+| Topic | `/universal_gnss_receiver/rtcm` |
+| Type | `universal_gnss_msgs/msg/RtcmFrame` |
 | QoS | reliable, keep-last 50 |
 | Message fields | `stamp`, `message_type`, `data` |
 
@@ -77,7 +77,7 @@ mock `STOP_REQUEST` must not be represented as a safety-rated emergency stop.
 
 The integration contract was checked against these MowgliNext paths:
 
-- `sensors/gps/start_gps.sh`
+- `install/compose/docker-compose.gps.yml`
 - `sensors/gps/mowgli_gnss_bridge/src/universal_gnss_topic_bridge.cpp`
 - `ros2/src/mowgli_interfaces/msg/GnssStatus.msg`
 - `ros2/src/mowgli_interfaces/srv/HighLevelControl.srv`
@@ -85,9 +85,18 @@ The integration contract was checked against these MowgliNext paths:
 - `ros2/src/mowgli_behavior/trees/main_tree.xml`
 - `ros2/src/mowgli_bringup/launch/mowgli.launch.py`
 
-The pinned Universal GNSS revision observed during the review was
-`3495ffb9...`. Re-check these interfaces whenever MowgliNext updates that
-dependency.
+The current software contract was checked against MowgliNext
+`b5e46ed4917c8f11cd71a2b6bc4b63cec19ffd98` and Universal GNSS
+`d02e23f17d34e58f75f4c7a7f72f8d34ea766bfa`. The earlier `3495ffb9...`
+baseline used another message package and internal topic. Re-check these
+interfaces whenever MowgliNext updates that dependency.
+
+The supplied systemd unit sources ROS and a workspace on the **host**. A
+container-only MowgliNext installation does not provide these host paths.
+The generic localhost TCP output remains usable; do not enable the ROS unit
+until its dependencies, network/discovery settings and message contract are
+available in the actual adapter runtime. No container packaging is implied by
+this import/topic correction.
 
 ## Hardware proof still required
 

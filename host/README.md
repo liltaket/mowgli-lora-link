@@ -90,7 +90,7 @@ the same complete frames in byte-exact order, and reports missing/unexpected
 frame counts plus the delivery ratio as JSON.
 
 On the robot, first verify the TCP stream independently. When the current
-Mowgli ROS 2 environment and `universal_gnss_ros2` are available, publish the
+Mowgli ROS 2 environment and `universal_gnss_msgs` are available, publish the
 same validated stream to the receiver ingress with:
 
 ```bash
@@ -98,12 +98,17 @@ source /opt/ros/$ROS_DISTRO/setup.bash
 source /path/to/mowgli/install/setup.bash
 mowgli-lora-mowgli-rtcm \
   --host 127.0.0.1 --port 2233 \
-  --topic /_gps_internal/universal/rtcm
+  --topic /universal_gnss_receiver/rtcm
 ```
 
 The bridge uses reliable keep-last-50 QoS and preserves each complete RTCM3
 frame byte-for-byte. Public `/rtcm` is an observation mirror, not the receiver
 ingress. See [`docs/MOWGLI_INTEGRATION.md`](../docs/MOWGLI_INTEGRATION.md).
+
+The supplied systemd ROS adapter needs ROS and the message package on the host.
+Running MowgliNext in containers does not install those host dependencies.
+Keep using the generic TCP modem service until the ROS adapter runtime is
+explicitly provisioned; no receiver, motion or blade settings are changed here.
 
 For normal robot boot, install `host/systemd/mowgli-lora-mowgli-rtcm.service`
 and copy `host/config/mowgli-ros.example.env` to
