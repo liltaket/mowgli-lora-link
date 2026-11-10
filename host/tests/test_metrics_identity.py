@@ -18,7 +18,9 @@ class MetricsIdentityTests(unittest.TestCase):
         try:
             with (
                 patch.dict(os.environ, {"INVOCATION_ID": "b" * 32}),
-                urlopen(f"http://127.0.0.1:{server.server_port}/healthz", timeout=2) as response,
+                urlopen(
+                    f"http://127.0.0.1:{server.server_port}/healthz", timeout=2
+                ) as response,
             ):
                 health = json.load(response)
             self.assertEqual(invocation, health["invocation_id"])
@@ -32,7 +34,9 @@ class MetricsIdentityTests(unittest.TestCase):
         with patch.dict(os.environ, {"INVOCATION_ID": "not-an-invocation"}):
             server = serve_metrics(Metrics(), "127.0.0.1", 0)
         try:
-            with urlopen(f"http://127.0.0.1:{server.server_port}/healthz", timeout=2) as response:
+            with urlopen(
+                f"http://127.0.0.1:{server.server_port}/healthz", timeout=2
+            ) as response:
                 self.assertNotIn("invocation_id", json.load(response))
         finally:
             server.shutdown()
