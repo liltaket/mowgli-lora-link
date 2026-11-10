@@ -1,7 +1,14 @@
+import sys
 import unittest
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
-from host.mowgli_lora.mowgli_ros import RtcmTcpReader, populate_rtcm_message
+from host.mowgli_lora.mowgli_ros import (
+    DEFAULT_TOPIC,
+    RtcmTcpReader,
+    main,
+    populate_rtcm_message,
+)
 from host.mowgli_lora.rtcm import RtcmFrame
 
 
@@ -13,6 +20,56 @@ class DummyMessage:
 
 
 class MowgliRosAdapterTest(unittest.TestCase):
+    def test_current_message_package_and_default_receiver_topic(self):
+        published = []
+        reader = SimpleNamespace(
+            start=lambda: None, close=lambda: None, frames_received=0, frames_dropped=0
+        )
+        qos = SimpleNamespace(
+            HistoryPolicy=SimpleNamespace(KEEP_LAST=1),
+            ReliabilityPolicy=SimpleNamespace(RELIABLE=1),
+            QoSProfile=lambda **values: SimpleNamespace(**values),
+        )
+
+        class Node:
+            def __init__(self, _name):
+                pass
+
+            def create_publisher(self, message, topic, profile):
+                published.append((message, topic, profile))
+                return SimpleNamespace(publish=lambda _message: None)
+
+            def create_timer(self, *_args):
+                pass
+
+            def get_logger(self):
+                return SimpleNamespace(info=lambda _message: None)
+
+            def destroy_node(self):
+                pass
+
+        rclpy = ModuleType("rclpy")
+        rclpy.init = lambda **_kwargs: None
+        rclpy.spin = lambda _node: None
+        rclpy.shutdown = lambda: None
+        modules = {
+            "rclpy": rclpy,
+            "rclpy.node": SimpleNamespace(Node=Node),
+            "rclpy.qos": qos,
+            "universal_gnss_msgs": ModuleType("universal_gnss_msgs"),
+            "universal_gnss_msgs.msg": SimpleNamespace(RtcmFrame=DummyMessage),
+        }
+        with (
+            patch.dict(sys.modules, modules),
+            patch.object(sys, "argv", ["adapter"]),
+            patch("host.mowgli_lora.mowgli_ros.RtcmTcpReader", return_value=reader),
+        ):
+            main()
+        self.assertEqual("/universal_gnss_receiver/rtcm", DEFAULT_TOPIC)
+        self.assertEqual(DummyMessage, published[0][0])
+        self.assertEqual(DEFAULT_TOPIC, published[0][1])
+        self.assertEqual(50, published[0][2].depth)
+
     def test_populates_universal_gnss_shape_byte_exactly(self):
         frame = RtcmFrame(b"\xd3\0\0abc", 1077, 12.0)
         message = populate_rtcm_message(DummyMessage(), frame, "stamp")
