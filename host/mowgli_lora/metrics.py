@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import threading
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -52,6 +54,12 @@ def health_for_role(metrics: Metrics, role: str) -> tuple[bool, dict[str, bool]]
 def serve_metrics(
     metrics: Metrics, bind: str, port: int, *, role: str | None = None
 ) -> ThreadingHTTPServer:
+    # Capture the producer's systemd identity once, not per HTTP receipt. It is
+    # intentionally absent for manually launched/legacy services.
+    invocation_id = os.environ.get("INVOCATION_ID", "")
+    if not re.fullmatch(r"[a-f0-9]{32}", invocation_id):
+        invocation_id = ""
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path == "/metrics":
@@ -62,13 +70,14 @@ def serve_metrics(
                     healthy, checks = True, {}
                 else:
                     healthy, checks = health_for_role(metrics, role)
-                body = json.dumps(
-                    {
-                        "status": "ok" if healthy else "degraded",
-                        "role": role,
-                        "checks": checks,
-                    }
-                )
+                health = {
+                    "status": "ok" if healthy else "degraded",
+                    "role": role,
+                    "checks": checks,
+                }
+                if invocation_id:
+                    health["invocation_id"] = invocation_id
+                body = json.dumps(health)
             else:
                 self.send_error(404)
                 return
