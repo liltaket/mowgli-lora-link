@@ -45,6 +45,38 @@ use unstable `/dev/ttyACM0` names. The service reconnects USB automatically;
 an ESP boot-ID change clears pending host state and starts a new session.
 The example units add the service user to the normal `dialout` device group.
 
+### ESP32-S3 USB permissions
+
+Some Debian-derived Pi images ship `60-openocd.rules`, which assigns the
+ESP32-S3 native USB CDC/JTAG device to `plugdev`. The service units deliberately
+use only `SupplementaryGroups=dialout`, so install the repository rule before
+starting a service with this modem:
+
+```bash
+sudo install -D -m 0644 host/udev/99-mowgli-esp32s3-dialout.rules \
+  /etc/udev/rules.d/99-mowgli-esp32s3-dialout.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=tty
+```
+
+Unplug and reconnect the ESP32-S3 after reloading rules. Verify that the
+stable symlink and its resolved tty are owned by `root:dialout` with mode
+`0660`:
+
+```bash
+ls -l /dev/serial/by-id/
+serial_path=$(readlink -f /dev/serial/by-id/<ESP32-S3-DEVICE>)
+ls -l "$serial_path"
+```
+
+Use that exact `/dev/serial/by-id/...` path in the service configuration; do
+not replace it with a `/dev/ttyACM*` path. The rule matches only tty devices
+with the Espressif USB ancestor VID `303a` and PID `1001`, does not depend on a
+USB serial number, and does not grant the service access to `plugdev` devices.
+To roll back, remove `/etc/udev/rules.d/99-mowgli-esp32s3-dialout.rules`, reload
+rules, and reconnect the board. Restart the affected service after applying or
+rolling back the rule.
+
 The base ingress supports `stdin`, client `tcp`, and `serial`. The robot output
 is a localhost TCP server, default port 2233. A basic non-ROS end-to-end check
 looks like:

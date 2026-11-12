@@ -1,0 +1,4 @@
+# Keep the native USB CDC/JTAG tty for the supported ESP32-S3 modem usable by
+# the mowgli systemd services.  This is intentionally after 60-openocd.rules,
+# which can otherwise assign this VID:PID to plugdev.
+SUBSYSTEM=="tty", SUBSYSTEMS=="usb", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", GROUP="dialout", MODE="0660"

@@ -22,6 +22,14 @@ USB uses the ESP32-S3 native USB CDC/JTAG interface. A baud rate is supplied to
 serial tools for API compatibility, but native USB CDC is not a UART baud-rate
 limited link.
 
+On the Pi, install `host/udev/99-mowgli-esp32s3-dialout.rules` before enabling
+a host service. It matches only a tty with the Espressif USB ancestor VID
+`303a` and PID `1001` and assigns `root:dialout` mode `0660`, taking precedence
+over a possible `60-openocd.rules` `plugdev` assignment. Follow the install,
+replug, verification, and rollback procedure in
+[`host/README.md`](../host/README.md#esp32-s3-usb-permissions). Configure the
+resolved stable `/dev/serial/by-id/...` path, never `/dev/ttyACM*`.
+
 ## Antenna and power rules
 
 - Attach a suitable 868 MHz antenna to each SX1262 before any transmission.
