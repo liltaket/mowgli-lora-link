@@ -38,6 +38,12 @@ or safety controller.
   binary SHA-256 is
   `7236f033d66a3e7eb534ddcac649ed112814843ca427f455ef89943e8f5e540b`.
 
+The estimated airtime figures in the simulation, physical, diagnosis and
+reduced-rate sections were computed with the SF5/BW250 profile that was active
+when those runs were made. The live-RTCM check ran at BW500.
+With today's BW500 profile the same traffic takes half the airtime. See
+[RF_COMPLIANCE_ASSESSMENT.md](RF_COMPLIANCE_ASSESSMENT.md).
+
 ## Twelve-minute event-time simulation
 
 The nominal scheduler profile completed 720 seconds of event time:

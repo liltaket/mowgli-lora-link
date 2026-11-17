@@ -45,6 +45,10 @@ Primary standards:
 
 ## Current 868.3 MHz profile
 
+The calculated assessment with sources, the per-band arithmetic, and the
+recommended path are in
+[RF_COMPLIANCE_ASSESSMENT.md](RF_COMPLIANCE_ASSESSMENT.md).
+
 The present bench profile is 868.3 MHz, 500 kHz, SF5, CR4/5, +10 dBm radio
 setting, and about 33% aggregate airtime at the synthetic nominal RTCM load.
 It is not approved for continuous operation.
@@ -90,4 +94,6 @@ Primary regulatory sources:
 - [PTSFS 2025:1, sections 141 and 148](https://www.pts.se/contentassets/b05c8a7d01a64783aafc6a19e1b78590/ptsfs-2025-1-foreskrifter-om-undantag-fran-tillstandsplikt-for-anvandning-av-vissa-radiosandare.pdf)
 - [ETSI EN 300 220-2 V3.3.1](https://www.etsi.org/deliver/etsi_en/300200_300299/30022002/03.03.01_60/en_30022002v030301p.pdf)
 - [EU Implementing Decision 2025/2499](https://eur-lex.europa.eu/legal-content/SV/ALL/?uri=CELEX%3A32025D2499)
+  (lists EN 300 220-2 V3.3.1 as a harmonised standard; the band conditions are
+  Decision 2006/771/EC as amended by (EU) 2025/105)
 - [Semtech CAD technical note](https://www.semtech.com/uploads/technology/LoRa/cad-ensuring-lora-packets.pdf)

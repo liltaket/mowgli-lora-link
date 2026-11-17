@@ -90,3 +90,23 @@ python3 -m tools.lora_usb.mixed_bench \
 Neither physical mode connects to mower control. JSON reports are ignored by
 Git because they include local device identifiers; publish only reviewed,
 anonymized summaries.
+
+## RF budget calculator
+
+`rf_budget` computes exact SX126x time-on-air for this link's framing, the
+e.r.p. implied by a conducted power and antenna gain, and the fit against the
+Swedish 863–870 MHz non-specific SRD bands. It is arithmetic, not a
+measurement or a compliance test:
+
+```sh
+python3 -m tools.lora_usb.rf_budget                      # live-RTCM model, all plans
+python3 -m tools.lora_usb.rf_budget --list-scenarios
+python3 -m tools.lora_usb.rf_budget --scenario msm4-4c --plan p-bw250
+python3 -m tools.lora_usb.rf_budget --rtcm-recording base.mlr --antenna-gain-dbi 3
+python3 -m tools.lora_usb.rf_budget --polite-access --scenario msm4-4c   # LBT+AFA plan B
+python3 -m tools.lora_usb.rf_budget --range --base-height-m 3            # link budget
+```
+
+`duty_cycle.AirtimeBudget` is the reference sliding-hour airtime limiter
+intended for a later firmware port. The assessment and its sources are in
+[`docs/RF_COMPLIANCE_ASSESSMENT.md`](../../docs/RF_COMPLIANCE_ASSESSMENT.md).

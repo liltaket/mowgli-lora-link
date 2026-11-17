@@ -98,8 +98,20 @@ an approved EU868 channel-access design.
 
 The nominal synthetic multi-constellation RTCM profile is about 1.7 kB/s and
 would occupy roughly 33% of RF airtime with this profile. Do **not** run a long
-over-the-air full-rate soak merely because the modem can encode it. Continuous
-operation requires a separate EU868 duty-cycle/LBT/AFA and channel-plan review.
+over-the-air full-rate soak merely because the modem can encode it.
+
+The [RF compliance assessment](docs/RF_COMPLIANCE_ASSESSMENT.md) concludes that
+continuous operation at 868.3 MHz is not lawful in Sweden: live RTCM needs
+about 44% airtime against a 1% (36 s/h) limit, and the `modem_lab_17dbm`
+build exceeds 25 mW e.r.p. with a dipole-gain antenna. The recommended path is
+869.7–870.0 MHz at ≤ 5 mW e.r.p. with MSM4 RTCM, which keeps all four
+constellations and every band. Multi-channel LBT + AFA at 25 mW in
+863–868.6 MHz is the documented plan B if range proves too short. Run the
+calculator with:
+
+```bash
+python3 -m tools.lora_usb.rf_budget
+```
 
 ## Documents
 
@@ -110,6 +122,7 @@ operation requires a separate EU868 duty-cycle/LBT/AFA and channel-plan review.
 - [Current mixed-traffic test results](docs/TEST_RESULTS.md)
 - [MowgliNext integration contract](docs/MOWGLI_INTEGRATION.md)
 - [Security and EU868 design boundary](docs/SECURITY_AND_EU868.md)
+- [RF power and duty-cycle assessment](docs/RF_COMPLIANCE_ASSESSMENT.md)
 - [Roadmap and integration boundary](docs/ROADMAP.md)
 
 ## Repository status and license
