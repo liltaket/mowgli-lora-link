@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from .airtime import FIRMWARE_PHY, application_airtime_s
 from .application import (
     COMMAND_ACK,
     HELLO,
@@ -83,10 +84,8 @@ class WorkItem:
 
 
 def lora_airtime_s(application_size: int) -> float:
-    """SX1262 SF5/BW250/CR4/5 explicit-header airtime, preamble 12."""
-    radio_packet_bytes = application_size + 18
-    payload_term = math.ceil((8 * radio_packet_bytes + 16) / 20)
-    return 0.000128 * (26.25 + 5 * payload_term)
+    """Airtime of one application frame with the firmware's compiled PHY."""
+    return application_airtime_s(application_size, FIRMWARE_PHY)
 
 
 def percentile(values: list[float], fraction: float) -> float | None:
